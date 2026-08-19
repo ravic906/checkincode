@@ -21,7 +21,7 @@ import requests
 
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_MODEL = os.environ.get("LLM_MODEL", "llama-3.1-8b-instant")
+LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
 
 USAGE_LOG_PATH = Path(__file__).parent / "usage_log.jsonl"
 
