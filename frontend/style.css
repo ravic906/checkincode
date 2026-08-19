@@ -351,7 +351,7 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 /* Responsive: tablet and below -- sidebar stacks above the workspace
    instead of sitting beside it, so there's no fixed-width column fighting
    a narrow viewport. */
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .layout { flex-direction: column; overflow-y: auto; }
   .sidebar {
     width: 100%;
