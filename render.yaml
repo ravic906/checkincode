@@ -14,14 +14,8 @@ services:
       - key: LLM_MODEL
         value: llama-3.1-8b-instant
 
-  - type: web
+  - type: static
     name: sql-practice-frontend
-    runtime: static
-    plan: free
     rootDir: frontend
     buildCommand: ""
     staticPublishPath: .
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
