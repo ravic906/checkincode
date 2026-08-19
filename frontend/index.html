@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SQL Practice — Interview Prep</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SQL<span>Practice</span></div>
+    <div class="tier-badge" id="tierBadge">loading…</div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="filters">
+        <select id="difficultyFilter">
+          <option value="">All difficulties</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <select id="tagFilter">
+          <option value="">All tags</option>
+        </select>
+      </div>
+      <ul class="problem-list" id="problemList"></ul>
+    </aside>
+
+    <main class="workspace" id="workspace">
+      <div class="empty-state">
+        <h2>Pick a problem to get started</h2>
+        <p>Solve it with real SQL against real (slightly messy) data — every answer is verified by actually running your query in DuckDB. Wrong answers get a plain-language AI explanation.</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
