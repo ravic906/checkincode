@@ -8,11 +8,34 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">SQL<span>Practice</span></div>
-    <div class="tier-badge" id="tierBadge">loading…</div>
+    <div class="brand" id="brandHome">SQL<span>Practice</span></div>
+    <div class="topbar-right">
+      <label class="tutor-toggle" id="tutorToggleWrap">
+        <input type="checkbox" id="tutorToggle" checked />
+        <span>AI Tutor</span>
+      </label>
+      <div class="tier-badge" id="tierBadge">loading…</div>
+    </div>
   </header>
 
-  <div class="layout">
+  <section class="home-screen" id="homeScreen">
+    <h1>What do you want to practice?</h1>
+    <p class="home-sub">Pick a track. Every answer is verified by actually running it — no LLM guessing whether you're right.</p>
+    <div class="track-grid">
+      <button class="track-card" id="trackSql">
+        <div class="track-icon">🗄️</div>
+        <div class="track-title">SQL</div>
+        <div class="track-desc">Joins, aggregation, subqueries, window functions — graded by DuckDB.</div>
+      </button>
+      <button class="track-card disabled" id="trackPython" disabled>
+        <div class="track-icon">🐍</div>
+        <div class="track-title">Python</div>
+        <div class="track-desc">Coming soon.</div>
+      </button>
+    </div>
+  </section>
+
+  <div class="layout" id="practiceLayout" style="display:none;">
     <aside class="sidebar" id="sidebar">
       <div class="filters">
         <select id="difficultyFilter">

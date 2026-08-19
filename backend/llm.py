@@ -38,7 +38,15 @@ SYSTEM_PROMPT = (
     "plain simple language, what mistake they made and how to think about "
     "fixing it. Do NOT just hand them the corrected query verbatim -- guide "
     "them conceptually, in 3-6 sentences. Be encouraging but direct about "
-    "the error."
+    "the error.\n\n"
+    "The student may ask follow-up questions. Only answer questions about "
+    "this specific SQL problem, their query, or general SQL/database "
+    "concepts directly relevant to it (e.g. how JOINs, NULLs, GROUP BY, "
+    "window functions work). If a follow-up is unrelated to SQL or this "
+    "problem (e.g. general trivia, other programming languages, personal "
+    "questions), politely decline in one sentence and redirect the student "
+    "back to the SQL problem at hand -- do not answer the off-topic "
+    "question."
 )
 
 
@@ -66,32 +74,19 @@ def _log_usage(entry: dict):
         f.write(json.dumps(entry) + "\n")
 
 
-def get_explanation(
-    *,
-    user_id: str,
-    problem: dict,
-    student_query: str,
-    expected_preview: dict,
-    actual_preview: dict,
-    error: str | None = None,
-) -> dict:
+def _call_chat(*, user_id: str, problem_id: str, messages: list[dict]) -> dict:
     """
-    Calls the configured OpenAI-compatible chat completions endpoint to
-    explain a wrong (or erroring) submission. Returns:
-        {"explanation": str, "usage": {"prompt_tokens", "completion_tokens", "total_tokens", "estimated_cost_usd"}}
-
-    Raises RuntimeError if LLM_API_KEY isn't configured or the call fails --
-    caller should catch this and degrade gracefully (e.g. show a generic
-    "couldn't get an AI explanation right now" message) rather than 500ing
-    the whole submission.
+    Shared low-level call: posts `messages` to the configured
+    OpenAI-compatible chat completions endpoint, logs usage, and returns
+    {"reply": str, "usage": {...}}. Raises RuntimeError if LLM_API_KEY isn't
+    configured or the HTTP call fails -- callers should catch this and
+    degrade gracefully rather than 500ing the request.
     """
     if not LLM_API_KEY:
         raise RuntimeError(
             "LLM_API_KEY is not set. Configure LLM_API_BASE / LLM_API_KEY / "
-            "LLM_MODEL env vars to enable AI explanations."
+            "LLM_MODEL env vars to enable the AI tutor."
         )
-
-    user_prompt = _build_user_prompt(problem, student_query, expected_preview, actual_preview, error)
 
     resp = requests.post(
         f"{LLM_API_BASE}/chat/completions",
@@ -101,10 +96,7 @@ def get_explanation(
         },
         json={
             "model": LLM_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
+            "messages": messages,
             "temperature": 0.3,
             "max_tokens": 300,
         },
@@ -113,7 +105,7 @@ def get_explanation(
     resp.raise_for_status()
     data = resp.json()
 
-    explanation = data["choices"][0]["message"]["content"].strip()
+    reply = data["choices"][0]["message"]["content"].strip()
     usage = data.get("usage", {})
     prompt_tokens = usage.get("prompt_tokens", 0)
     completion_tokens = usage.get("completion_tokens", 0)
@@ -125,7 +117,7 @@ def get_explanation(
 
     _log_usage({
         "user_id": user_id,
-        "problem_id": problem["id"],
+        "problem_id": problem_id,
         "model": LLM_MODEL,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -134,7 +126,7 @@ def get_explanation(
     })
 
     return {
-        "explanation": explanation,
+        "reply": reply,
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -142,3 +134,58 @@ def get_explanation(
             "estimated_cost_usd": round(estimated_cost, 6),
         },
     }
+
+
+def get_explanation(
+    *,
+    user_id: str,
+    problem: dict,
+    student_query: str,
+    expected_preview: dict,
+    actual_preview: dict,
+    error: str | None = None,
+) -> dict:
+    """
+    Explains a wrong (or erroring) submission. Returns:
+        {"explanation": str, "usage": {...}}
+    """
+    user_prompt = _build_user_prompt(problem, student_query, expected_preview, actual_preview, error)
+    result = _call_chat(
+        user_id=user_id,
+        problem_id=problem["id"],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    return {"explanation": result["reply"], "usage": result["usage"]}
+
+
+def ask_followup(
+    *,
+    user_id: str,
+    problem: dict,
+    student_query: str,
+    expected_preview: dict,
+    actual_preview: dict,
+    error: str | None,
+    conversation: list[dict],
+    question: str,
+) -> dict:
+    """
+    Continues the tutoring conversation with a free-form follow-up question
+    from the student. `conversation` is the prior turns as
+    [{"role": "assistant"|"user", "content": ...}, ...], starting with the
+    initial explanation as the first assistant turn. Returns:
+        {"answer": str, "usage": {...}}
+    """
+    initial_context = _build_user_prompt(problem, student_query, expected_preview, actual_preview, error)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": initial_context},
+    ]
+    messages.extend(conversation)
+    messages.append({"role": "user", "content": question})
+
+    result = _call_chat(user_id=user_id, problem_id=problem["id"], messages=messages)
+    return {"answer": result["reply"], "usage": result["usage"]}

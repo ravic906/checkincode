@@ -32,6 +32,26 @@ let allProblems = [];
 let currentProblem = null;
 let monacoEditor = null;
 
+// Follow-up chat state for the currently-shown result. Reset on every new run/submit.
+let followupState = null; // { studentQuery, expectedPreview, actualPreview, error, conversation: [{role, content}] }
+
+function getTutorEnabled() {
+  const v = localStorage.getItem("sqlpractice_tutor_enabled");
+  return v === null ? true : v === "true";
+}
+function setTutorEnabled(enabled) {
+  localStorage.setItem("sqlpractice_tutor_enabled", String(enabled));
+}
+
+function showHome() {
+  document.getElementById("homeScreen").style.display = "flex";
+  document.getElementById("practiceLayout").style.display = "none";
+}
+function showSqlTrack() {
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("practiceLayout").style.display = "flex";
+}
+
 async function refreshTierBadge() {
   const usage = await api("/api/usage");
   const badge = document.getElementById("tierBadge");
@@ -114,6 +134,7 @@ function escapeHtml(s) {
 async function loadProblem(id) {
   const p = await api(`/api/problems/${id}`);
   currentProblem = p;
+  followupState = null;
   renderProblemList();
 
   const tablesHtml = Object.entries(p.sample_tables)
@@ -181,6 +202,7 @@ async function runQuery(isSubmit) {
   const query = monacoEditor.getValue();
   const resultsSection = document.getElementById("resultsSection");
   resultsSection.innerHTML = `<div class="loading-dots">Running against DuckDB…</div>`;
+  followupState = null;
 
   const runBtn = document.getElementById("runBtn");
   const submitBtn = document.getElementById("submitBtn");
@@ -190,9 +212,13 @@ async function runQuery(isSubmit) {
   try {
     const result = await api("/api/submit", {
       method: "POST",
-      body: JSON.stringify({ problem_id: currentProblem.id, query }),
+      body: JSON.stringify({
+        problem_id: currentProblem.id,
+        query,
+        want_explanation: getTutorEnabled(),
+      }),
     });
-    renderResult(result, isSubmit);
+    renderResult(result, isSubmit, query);
   } catch (e) {
     if (e.status === 429) {
       resultsSection.innerHTML = `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
@@ -206,8 +232,9 @@ async function runQuery(isSubmit) {
   }
 }
 
-function renderResult(result, isSubmit) {
+function renderResult(result, isSubmit, studentQuery) {
   const resultsSection = document.getElementById("resultsSection");
+  const tutorOn = getTutorEnabled();
   let html = "";
 
   if (result.correct) {
@@ -222,13 +249,27 @@ function renderResult(result, isSubmit) {
       </div>`;
     }
 
-    if (result.explanation) {
-      html += `<div class="explanation-box"><div class="label">AI Tutor</div>${escapeHtml(result.explanation)}</div>`;
+    if (!tutorOn) {
+      // Tutor toggled off client-side -- backend already skipped the LLM call.
+    } else if (result.explanation) {
+      html += `<div class="explanation-box"><div class="label">AI Tutor</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
+      html += `<div id="followupThread" class="followup-thread"></div>
+        <div class="followup-input-row">
+          <input type="text" id="followupInput" placeholder="Ask a follow-up question about this problem…" />
+          <button id="followupSendBtn">Ask</button>
+        </div>`;
+      followupState = {
+        studentQuery,
+        expectedPreview: result.expected_preview,
+        actualPreview: result.actual_preview,
+        error: result.actual_preview ? null : result.error,
+        conversation: [{ role: "assistant", content: result.explanation }],
+      };
     } else if (result.explanation_error) {
       html += `<div class="explanation-box"><div class="label">AI Tutor</div>${escapeHtml(result.explanation_error)}</div>`;
     } else if (!result.explanation_available) {
       html += `<div class="upsell-box">
-        You've used today's free AI explanations. Upgrade to Pro (₹199/mo) for unlimited explanations on wrong answers.
+        You've used today's free AI tutor messages. Upgrade to Pro (₹199/mo) for unlimited AI help.
         <br/><button id="inlineUpgradeBtn">Upgrade now</button>
       </div>`;
     }
@@ -237,6 +278,66 @@ function renderResult(result, isSubmit) {
   resultsSection.innerHTML = html;
   const upBtn = document.getElementById("inlineUpgradeBtn");
   if (upBtn) upBtn.onclick = doUpgrade;
+
+  const sendBtn = document.getElementById("followupSendBtn");
+  const followupInput = document.getElementById("followupInput");
+  if (sendBtn && followupInput) {
+    sendBtn.onclick = sendFollowup;
+    followupInput.onkeydown = (e) => { if (e.key === "Enter") sendFollowup(); };
+  }
+}
+
+function renderFollowupThread() {
+  const thread = document.getElementById("followupThread");
+  if (!thread || !followupState) return;
+  // Skip turn 0 (the initial explanation) -- it's already shown above in the explanation box.
+  const turns = followupState.conversation.slice(1);
+  thread.innerHTML = turns.map(t => `
+    <div class="followup-turn ${t.role}">
+      <div class="who">${t.role === "user" ? "You" : "AI Tutor"}</div>
+      ${escapeHtml(t.content)}
+    </div>
+  `).join("");
+}
+
+async function sendFollowup() {
+  const input = document.getElementById("followupInput");
+  const question = input.value.trim();
+  if (!question || !followupState) return;
+
+  const sendBtn = document.getElementById("followupSendBtn");
+  sendBtn.disabled = true;
+  input.disabled = true;
+
+  followupState.conversation.push({ role: "user", content: question });
+  renderFollowupThread();
+  input.value = "";
+
+  try {
+    const res = await api("/api/ask-followup", {
+      method: "POST",
+      body: JSON.stringify({
+        problem_id: currentProblem.id,
+        student_query: followupState.studentQuery,
+        expected_preview: followupState.expectedPreview,
+        actual_preview: followupState.actualPreview,
+        error: followupState.error,
+        conversation: followupState.conversation.slice(0, -1),
+        question,
+      }),
+    });
+    followupState.conversation.push({ role: "assistant", content: res.answer });
+    renderFollowupThread();
+  } catch (e) {
+    followupState.conversation.pop(); // remove the question we optimistically added
+    renderFollowupThread();
+    const thread = document.getElementById("followupThread");
+    thread.innerHTML += `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
+  } finally {
+    sendBtn.disabled = false;
+    input.disabled = false;
+    refreshTierBadge();
+  }
 }
 
 async function init() {
@@ -247,6 +348,15 @@ async function init() {
 
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("tagFilter").onchange = renderProblemList;
+
+  const tutorToggle = document.getElementById("tutorToggle");
+  tutorToggle.checked = getTutorEnabled();
+  tutorToggle.onchange = () => setTutorEnabled(tutorToggle.checked);
+
+  document.getElementById("brandHome").onclick = showHome;
+  document.getElementById("trackSql").onclick = showSqlTrack;
+
+  showHome();
 }
 
 init();

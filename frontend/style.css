@@ -33,8 +33,21 @@ body {
   flex-shrink: 0;
 }
 
-.brand { font-weight: 700; font-size: 18px; }
+.brand { font-weight: 700; font-size: 18px; cursor: pointer; }
 .brand span { color: var(--accent); }
+
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+
+.tutor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.tutor-toggle input { accent-color: var(--accent); cursor: pointer; }
 
 .tier-badge {
   font-size: 12px;
@@ -257,3 +270,124 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .diff-preview .col h4 { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 0; }
 
 .loading-dots { color: var(--muted); font-size: 13px; }
+
+.followup-thread { margin-top: 4px; }
+.followup-turn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.followup-turn.user { background: var(--panel-2); border: 1px solid var(--border); margin-left: 24px; }
+.followup-turn.assistant { background: rgba(79,140,255,0.08); border: 1px solid rgba(79,140,255,0.25); margin-right: 24px; }
+.followup-turn .who { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; font-weight: 700; }
+
+.followup-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.followup-input-row input {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.followup-input-row button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.followup-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Home screen */
+.home-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+}
+.home-screen h1 { font-size: 28px; margin: 0 0 8px 0; }
+.home-sub { color: var(--muted); margin: 0 0 36px 0; max-width: 480px; }
+
+.track-grid {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.track-card {
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 20px;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s;
+  font-family: inherit;
+}
+.track-card:hover:not(.disabled) { border-color: var(--accent); transform: translateY(-2px); }
+.track-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.track-icon { font-size: 32px; margin-bottom: 12px; }
+.track-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+.track-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+/* Responsive: tablet and below -- sidebar stacks above the workspace
+   instead of sitting beside it, so there's no fixed-width column fighting
+   a narrow viewport. */
+@media (max-width: 900px) {
+  .layout { flex-direction: column; overflow-y: auto; }
+  .sidebar {
+    width: 100%;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .workspace { overflow-y: visible; }
+
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  .topbar-right { flex-wrap: wrap; gap: 8px; width: 100%; justify-content: flex-end; }
+  .tier-badge { font-size: 11px; padding: 5px 10px; }
+
+  .problem-header, .tables-section, .editor-section, .results-section {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .diff-preview { grid-template-columns: 1fr; }
+
+  #editor { height: 180px; }
+
+  .track-grid { flex-direction: column; align-items: center; }
+  .track-card { width: 100%; max-width: 320px; }
+  .home-screen { padding: 24px 16px; }
+  .home-screen h1 { font-size: 22px; }
+}
+
+/* Responsive: phones -- tighten further and let the toolbar wrap instead
+   of squeezing Run/Submit into an unreadably narrow row. */
+@media (max-width: 520px) {
+  .brand { font-size: 16px; }
+  .filters { flex-direction: column; }
+  .editor-toolbar { flex-wrap: wrap; gap: 8px; }
+  .editor-toolbar .actions { width: 100%; }
+  button.run-btn, button.submit-btn { flex: 1; }
+  .followup-input-row { flex-direction: column; }
+  .followup-turn.user, .followup-turn.assistant { margin-left: 0; margin-right: 0; }
+}

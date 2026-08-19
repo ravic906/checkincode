@@ -76,6 +76,17 @@ def _get_usage(user_id: str):
 class SubmitRequest(BaseModel):
     problem_id: str
     query: str
+    want_explanation: bool = True
+
+
+class FollowupRequest(BaseModel):
+    problem_id: str
+    student_query: str
+    expected_preview: dict
+    actual_preview: dict | None = None
+    error: str | None = None
+    conversation: list[dict]
+    question: str
 
 
 @app.get("/api/problems")
@@ -204,6 +215,13 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
 
     can_explain = u["tier"] == "paid" or u["explanations"] < FREE_DAILY_EXPLANATIONS
     result["explanation_available"] = can_explain
+
+    if not req.want_explanation:
+        # Student has the AI tutor toggled off -- don't spend an LLM call
+        # (or a quota slot) they didn't ask for.
+        result["explanation"] = None
+        return result
+
     if not can_explain:
         result["explanation"] = None
         return result
@@ -225,3 +243,42 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
         result["explanation_error"] = f"AI explanation unavailable right now ({e})."
 
     return result
+
+
+@app.post("/api/ask-followup")
+def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None)):
+    """
+    Lets a student ask a free-form follow-up question after an AI
+    explanation, e.g. "why does NULL break GROUP BY like that?". Counts
+    against the same daily AI-tutor quota as the initial explanation --
+    it's the same cost category, just a different shape of question.
+    """
+    user_id = x_user_id or str(uuid.uuid4())
+    u = _get_usage(user_id)
+
+    problem = get_problem(req.problem_id)
+    if not problem:
+        raise HTTPException(404, "Problem not found")
+
+    if u["tier"] != "paid" and u["explanations"] >= FREE_DAILY_EXPLANATIONS:
+        raise HTTPException(
+            429,
+            f"Daily free AI tutor limit ({FREE_DAILY_EXPLANATIONS}) reached. "
+            "Upgrade to keep asking questions today.",
+        )
+
+    try:
+        llm_result = llm.ask_followup(
+            user_id=user_id,
+            problem=problem,
+            student_query=req.student_query,
+            expected_preview=req.expected_preview,
+            actual_preview=req.actual_preview or {},
+            error=req.error,
+            conversation=req.conversation,
+            question=req.question,
+        )
+        u["explanations"] += 1
+        return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
+    except Exception as e:
+        raise HTTPException(502, f"AI tutor unavailable right now ({e}).")
