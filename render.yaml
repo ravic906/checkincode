@@ -17,6 +17,5 @@ services:
   - type: web
     name: sql-practice-frontend
     runtime: static
-    plan: free
     buildCommand: ""
     staticPublishPath: frontend
