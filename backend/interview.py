@@ -32,7 +32,7 @@ MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a
 GENERIC_TOPICS = topics.ALL_TOPICS
 
 
-def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False) -> dict:
+def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False, persona: str = "neutral") -> dict:
     if is_trial:
         # A separate branch, not a lowered floor -- so a paid user's
         # request can never accidentally slide under the real 20 min floor.
@@ -54,6 +54,7 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
         "last_table_context": None,
         "ended": False,
         "feedback": None,
+        "persona": persona,  # "friendly" | "neutral" | "strict" -- immutable for the session's life
     }
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -62,8 +63,8 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
                 INSERT INTO interview_sessions
                     (session_id, user_id, mode, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
-                     current_topic_turns, last_table_context, ended, feedback)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     current_topic_turns, last_table_context, ended, feedback, persona)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
@@ -71,7 +72,7 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
                     session["started_at"], json.dumps(session["topics_covered"]),
                     json.dumps(session["conversation"]), session["current_topic"],
                     session["current_topic_turns"], json.dumps(session["last_table_context"]),
-                    session["ended"], json.dumps(session["feedback"]),
+                    session["ended"], json.dumps(session["feedback"]), session["persona"],
                 ),
             )
     return session

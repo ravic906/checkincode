@@ -88,6 +88,7 @@ class InterviewStartRequest(BaseModel):
     resume_text: str | None = None
     skip_intro: bool = False
     duration_minutes: int = 45
+    persona: str = "neutral"  # "friendly" | "neutral" | "strict"
 
 
 class InterviewAnswerRequest(BaseModel):
@@ -386,6 +387,8 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         raise HTTPException(400, "mode must be 'personalized' or 'generic'")
     if req.mode == "personalized" and not req.resume_text:
         raise HTTPException(400, "resume_text is required for a personalized interview")
+    if req.persona not in ("friendly", "neutral", "strict"):
+        raise HTTPException(400, "persona must be 'friendly', 'neutral', or 'strict'")
 
     session = interview.create_session(
         user_id=user_id,
@@ -394,6 +397,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         skip_intro=req.skip_intro,
         duration_seconds=req.duration_minutes * 60,
         is_trial=is_trial,
+        persona=req.persona,
     )
     if is_trial:
         # Mark the trial used now, at session creation, not at completion --
@@ -408,6 +412,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
                 topics=interview.GENERIC_TOPICS,
                 resume_text=req.resume_text,
                 conversation=[],
+                persona=session["persona"],
             )
         except Exception as e:
             raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
@@ -466,6 +471,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             current_topic=session["current_topic"],
             topic_turn_count=session["current_topic_turns"],
             forced_topic=forced_topic,
+            persona=session["persona"],
         )
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a
@@ -505,6 +511,7 @@ def api_interview_resume(session_id: str, x_user_id: str = Header(default=None),
     return {
         "session_id": session["session_id"],
         "mode": session["mode"],
+        "persona": session["persona"],
         "ended": session["ended"],
         "feedback": session["feedback"],
         "conversation": session["conversation"],

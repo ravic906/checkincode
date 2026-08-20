@@ -193,6 +193,22 @@ def ask_phoenix(
     return {"answer": result["reply"], "usage": result["usage"]}
 
 
+PERSONA_TONE = {
+    "friendly": (
+        "Adopt a warm, encouraging tone -- acknowledge good answers "
+        "explicitly, give the candidate room to think, and soften "
+        "follow-ups on gaps (e.g. \"no worries, let's come at it from "
+        "another angle\").\n\n"
+    ),
+    "neutral": "",  # today's existing tone, unchanged
+    "strict": (
+        "Adopt a terse, no-frills tone typical of a tough technical panel "
+        "round -- minimal encouragement, move on quickly from vague "
+        "answers, press harder on follow-ups.\n\n"
+    ),
+}
+
+
 def _interview_system_prompt(
     topics: list[str],
     resume_text: str | None,
@@ -200,6 +216,7 @@ def _interview_system_prompt(
     topic_turn_count: int = 0,
     max_turns_per_topic: int = 3,
     forced_topic: str | None = None,
+    persona: str = "neutral",
 ) -> str:
     resume_block = ""
     if resume_text:
@@ -236,6 +253,7 @@ def _interview_system_prompt(
         "question at a time, in natural spoken language -- no markdown, no "
         "bullet points, no code blocks, since your question will be read "
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
+        f"{PERSONA_TONE.get(persona, '')}"
         f"{resume_block}"
         f"{topic_budget_block}"
         f"Topics to cover across the interview: {', '.join(topics)}.\n\n"
@@ -308,6 +326,7 @@ def interview_turn(
     current_topic: str | None = None,
     topic_turn_count: int = 0,
     forced_topic: str | None = None,
+    persona: str = "neutral",
 ) -> dict:
     """
     Decides the next interview question. `conversation` is the full turn
@@ -326,7 +345,7 @@ def interview_turn(
     valid JSON, so a single malformed response doesn't break the interview.
     """
     messages = [{"role": "system", "content": _interview_system_prompt(
-        topics, resume_text, current_topic, topic_turn_count, forced_topic=forced_topic,
+        topics, resume_text, current_topic, topic_turn_count, forced_topic=forced_topic, persona=persona,
     )}]
     if conversation:
         # Chat APIs only accept {role, content} -- strip our extra "topic" bookkeeping field.

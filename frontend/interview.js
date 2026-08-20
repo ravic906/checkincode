@@ -167,6 +167,24 @@ async function renderInterviewSetupScreen() {
         </div>
 
         <div class="setup-row">
+          <div class="setup-section-label">Interviewer style</div>
+          <div class="persona-chips" id="personaChips">
+            <label class="persona-chip" data-value="friendly">
+              <input type="radio" name="interviewPersona" value="friendly" />
+              <span>Friendly</span>
+            </label>
+            <label class="persona-chip selected" data-value="neutral">
+              <input type="radio" name="interviewPersona" value="neutral" checked />
+              <span>Neutral</span>
+            </label>
+            <label class="persona-chip" data-value="strict">
+              <input type="radio" name="interviewPersona" value="strict" />
+              <span>Strict</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setup-row">
           <div class="duration-row-label">
             <span class="setup-section-label">Duration</span>
             <span class="duration-value" id="durationValue">${isTrialEligible ? "10 min (trial)" : "45 min"}</span>
@@ -198,6 +216,14 @@ async function renderInterviewSetupScreen() {
       card.querySelector('input[type="radio"]').checked = true;
       document.getElementById("resumeUploadRow").style.display =
         card.dataset.value === "personalized" ? "flex" : "none";
+    });
+  });
+
+  document.querySelectorAll('.persona-chip').forEach(chip => {
+    chip.addEventListener("click", () => {
+      document.querySelectorAll('.persona-chip').forEach(c => c.classList.remove("selected"));
+      chip.classList.add("selected");
+      chip.querySelector('input[type="radio"]').checked = true;
     });
   });
 
@@ -234,6 +260,7 @@ async function renderInterviewSetupScreen() {
     const startBtn = document.getElementById("startInterviewBtn");
     if (startBtn.disabled) return; // guard against a double-click firing two overlapping interviews
     const mode = document.querySelector('input[name="interviewMode"]:checked').value;
+    const persona = document.querySelector('input[name="interviewPersona"]:checked').value;
     const skipIntro = document.getElementById("skipIntroCheck").checked;
     const durationMinutes = parseInt(document.getElementById("durationSlider").value, 10);
     const errorEl = document.getElementById("setupError");
@@ -249,7 +276,7 @@ async function renderInterviewSetupScreen() {
     try {
       const res = await api("/api/interview/start", {
         method: "POST",
-        body: JSON.stringify({ mode, resume_text: resumeText, skip_intro: skipIntro, duration_minutes: durationMinutes }),
+        body: JSON.stringify({ mode, persona, resume_text: resumeText, skip_intro: skipIntro, duration_minutes: durationMinutes }),
       });
       beginLiveInterview(res, mode, resumeText);
     } catch (err) {

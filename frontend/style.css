@@ -723,6 +723,28 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .mode-card-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
 .mode-card-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
+.persona-chips { display: flex; gap: 8px; margin-top: 8px; }
+.persona-chip {
+  flex: 1;
+  position: relative;
+  text-align: center;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-panel-2);
+  border-radius: 10px;
+  padding: 10px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.15s, background 0.15s;
+}
+.persona-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.persona-chip:hover { border-color: #3a4152; }
+.persona-chip.selected {
+  border-color: var(--gold);
+  background: linear-gradient(160deg, rgba(240,184,110,0.09), rgba(253,160,133,0.04));
+  color: var(--gold);
+}
+
 .setup-row { display: flex; flex-direction: column; gap: 10px; }
 
 .file-drop {
