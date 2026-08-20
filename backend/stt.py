@@ -1,12 +1,13 @@
 """
 Speech-to-text for the mock interview, via an OpenAI-compatible audio
-transcription endpoint (Fireworks' Whisper API today: whisper-v3-turbo).
+transcription endpoint (DeepInfra's hosted Whisper today: whisper-large-v3-turbo).
 
 Kept provider-agnostic on purpose, same pattern as llm.py -- swap to
-Groq Whisper (or anything else with the same /audio/transcriptions
-contract) later purely by changing STT_API_BASE/STT_API_KEY/STT_MODEL,
-no code change. This module never mentions "Fireworks" in its public
-interface for that reason.
+Groq Whisper, OpenAI, or anything else with the same /audio/transcriptions
+contract later purely by changing STT_API_BASE/STT_API_KEY/STT_MODEL,
+no code change. This module never mentions "DeepInfra" in its public
+interface for that reason. (Previously pointed at Fireworks, which
+deprecated its audio transcription API entirely in June 2026.)
 
 Unlike the browser's old Web Speech API (client-side, live interim
 results), this is record-the-full-answer-then-transcribe: the frontend
@@ -20,9 +21,9 @@ import os
 
 import requests
 
-STT_API_BASE = os.environ.get("STT_API_BASE", "https://audio-prod.api.fireworks.ai/v1")
+STT_API_BASE = os.environ.get("STT_API_BASE", "https://api.deepinfra.com/v1/openai")
 STT_API_KEY = os.environ.get("STT_API_KEY", "")
-STT_MODEL = os.environ.get("STT_MODEL", "whisper-v3-turbo")
+STT_MODEL = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
 
 
 def transcribe(audio_bytes: bytes, filename: str) -> str:
