@@ -256,7 +256,8 @@ def interview_turn(
     """
     messages = [{"role": "system", "content": _interview_system_prompt(topics, resume_text)}]
     if conversation:
-        messages.extend(conversation)
+        # Chat APIs only accept {role, content} -- strip our extra "topic" bookkeeping field.
+        messages.extend({"role": t["role"], "content": t["content"]} for t in conversation)
     else:
         messages.append({"role": "user", "content": "Begin the interview with the first question."})
 
