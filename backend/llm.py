@@ -74,13 +74,19 @@ def _log_usage(entry: dict):
         f.write(json.dumps(entry) + "\n")
 
 
-def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 300) -> dict:
+def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 300, json_mode: bool = False) -> dict:
     """
     Shared low-level call: posts `messages` to the configured
     OpenAI-compatible chat completions endpoint, logs usage, and returns
     {"reply": str, "usage": {...}}. Raises RuntimeError if LLM_API_KEY isn't
     configured or the HTTP call fails -- callers should catch this and
     degrade gracefully rather than 500ing the request.
+
+    `json_mode` requests the provider's structured-output mode (OpenAI-
+    compatible `response_format: {"type": "json_object"}`) for callers that
+    parse the reply as JSON -- without it, some models (e.g. Groq's
+    gpt-oss) can misinterpret "respond with only a JSON object" instructions
+    as a request to invoke a tool, which the API then rejects.
     """
     if not LLM_API_KEY:
         raise RuntimeError(
@@ -88,18 +94,22 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
             "LLM_MODEL env vars to enable the AI tutor."
         )
 
+    payload = {
+        "model": LLM_MODEL,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": max_tokens,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
     resp = requests.post(
         f"{LLM_API_BASE}/chat/completions",
         headers={
             "Authorization": f"Bearer {LLM_API_KEY}",
             "Content-Type": "application/json",
         },
-        json={
-            "model": LLM_MODEL,
-            "messages": messages,
-            "temperature": 0.3,
-            "max_tokens": max_tokens,
-        },
+        json=payload,
         timeout=30,
     )
     if not resp.ok:
@@ -261,7 +271,7 @@ def interview_turn(
     else:
         messages.append({"role": "user", "content": "Begin the interview with the first question."})
 
-    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=250)
+    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=250, json_mode=True)
     try:
         parsed = _parse_json_reply(result["reply"])
         return {
@@ -301,7 +311,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
         {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
-    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=600)
+    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=600, json_mode=True)
     try:
         report = _parse_json_reply(result["reply"])
     except json.JSONDecodeError:
