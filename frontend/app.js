@@ -82,6 +82,14 @@ async function doUpgrade() {
   await refreshTierBadge();
 }
 
+async function resetProgress() {
+  if (!confirm("Reset all solved-problem progress? This can't be undone.")) return;
+  await api("/api/submissions", { method: "DELETE" });
+  const problemsRes = await api("/api/problems");
+  allProblems = problemsRes.problems;
+  renderProblemList();
+}
+
 function pillClass(difficulty) {
   return `pill ${difficulty}`;
 }
@@ -99,15 +107,18 @@ function renderProblemList() {
 
   for (const p of filtered) {
     const li = document.createElement("li");
-    li.className = "problem-item" + (currentProblem && currentProblem.id === p.id ? " active" : "");
+    li.className = "problem-item"
+      + (currentProblem && currentProblem.id === p.id ? " active" : "")
+      + (p.locked ? " locked" : "");
     li.innerHTML = `
-      <div class="title">${p.title}</div>
+      <div class="title">${p.solved ? "✅ " : ""}${p.title}</div>
       <div class="meta">
         <span class="${pillClass(p.difficulty)}">${p.difficulty}</span>
+        ${p.locked ? `<span class="pill locked-pill">🔒 Pro</span>` : ""}
         ${p.tags.map(t => `<span class="pill tag-pill">${t}</span>`).join("")}
       </div>
     `;
-    li.onclick = () => loadProblem(p.id);
+    li.onclick = () => p.locked ? showUpsell() : loadProblem(p.id);
     list.appendChild(li);
   }
 }
@@ -155,8 +166,24 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function showUpsell() {
+  document.getElementById("workspace").innerHTML = `
+    <div class="empty-state upsell-box">
+      This problem is part of Pro. Upgrade to ₹199/mo to unlock every practice problem.
+      <br/><button id="inlineUpgradeBtn">Upgrade now</button>
+    </div>
+  `;
+  document.getElementById("inlineUpgradeBtn").onclick = doUpgrade;
+}
+
 async function loadProblem(id) {
-  const p = await api(`/api/problems/${id}`);
+  let p;
+  try {
+    p = await api(`/api/problems/${id}`);
+  } catch (e) {
+    if (e.status === 402) return showUpsell();
+    throw e;
+  }
   currentProblem = p;
   followupState = null;
   renderProblemList();
@@ -243,9 +270,20 @@ async function runQuery(isSubmit) {
       }),
     });
     renderResult(result, isSubmit, query);
+    if (result.correct) {
+      const problemsRes = await api("/api/problems");
+      allProblems = problemsRes.problems;
+      renderProblemList();
+    }
   } catch (e) {
     if (e.status === 429) {
       resultsSection.innerHTML = `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
+    } else if (e.status === 402) {
+      resultsSection.innerHTML = `<div class="upsell-box">
+        This problem is part of Pro. Upgrade to ₹199/mo to unlock every practice problem.
+        <br/><button id="inlineUpgradeBtn">Upgrade now</button>
+      </div>`;
+      document.getElementById("inlineUpgradeBtn").onclick = doUpgrade;
     } else {
       resultsSection.innerHTML = `<div class="result-banner fail">Error: ${escapeHtml(e.message)}</div>`;
     }
@@ -378,6 +416,8 @@ async function init() {
   const tutorToggle = document.getElementById("tutorToggle");
   tutorToggle.checked = getTutorEnabled();
   tutorToggle.onchange = () => setTutorEnabled(tutorToggle.checked);
+
+  document.getElementById("resetProgressBtn").onclick = resetProgress;
 
   document.getElementById("brandHome").onclick = showHome;
   document.getElementById("trackSql").onclick = showSqlTrack;

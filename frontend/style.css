@@ -70,6 +70,17 @@ body {
   cursor: pointer;
 }
 
+.reset-progress-btn {
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.reset-progress-btn:hover { border-color: var(--red); color: var(--red); }
+
 .auth-section { display: flex; align-items: center; }
 .signin-btn {
   font-size: 12px;
@@ -146,6 +157,11 @@ body {
 .pill.medium { background: rgba(217,164,65,0.15); color: var(--amber); }
 .pill.hard { background: rgba(227,86,74,0.15); color: var(--red); }
 .tag-pill { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+.pill.solved-pill { background: rgba(56,193,114,0.15); color: var(--green); }
+.pill.locked-pill { background: linear-gradient(90deg,#f6d365,#fda085); color: #0f1115; }
+
+.problem-item.locked { opacity: 0.65; }
+.problem-item.locked:hover { background: none; cursor: default; }
 
 .workspace {
   flex: 1;
