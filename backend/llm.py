@@ -519,9 +519,14 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int, exist
         {"role": "system", "content": PROBLEM_BATCH_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
+    # Groq's rate limiter reserves the full max_tokens as "requested" TPM
+    # up front, regardless of how much the model actually generates -- so
+    # a small batch asking for the same fixed 4000-token ceiling as a big
+    # one wastes headroom against the (fairly tight, free-tier) 8000 TPM
+    # cap. Scale the ceiling down for small batches instead.
     result = _call_chat_with_retry(
         user_id=user_id, problem_id="admin-problem-batch", messages=messages,
-        max_tokens=4000, json_mode=True,
+        max_tokens=min(4000, max(800, count * 350)), json_mode=True,
     )
     parsed = _parse_json_reply(result["reply"])
     return {"problems": parsed.get("problems", []), "usage": result["usage"]}
