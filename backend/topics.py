@@ -11,8 +11,14 @@ recipes) but that come up constantly in real interviews.
 "Inserting, Updating, and Deleting" is deliberately excluded from
 GRADEABLE_TOPICS: the practice sandbox is read-only by design (see
 sandbox.py) and that invariant isn't changing, so no graded practice
-problem is ever written against this topic. It's still fine as an
-interview topic, since the interview never executes anything -- it's
+problem is ever written against this topic.
+
+EXTRA_TOPICS (Normalization, Transactions/ACID, Indexing/Performance) are
+also excluded from GRADEABLE_TOPICS -- they're design/ops questions, not
+"run a query and diff the output" recipes (a transaction problem
+inherently needs multiple statements, which conflicts with the
+single-SELECT grading model). Both DML and EXTRA_TOPICS are still fine as
+interview topics, since the interview never executes anything -- it's
 just conversation.
 """
 
@@ -45,6 +51,8 @@ EXTRA_TOPICS = [
 
 ALL_TOPICS = COOKBOOK_TOPICS + EXTRA_TOPICS
 
-# Topics a graded practice problem can be written against -- everything
-# except DML, since grading requires read-only execution.
-GRADEABLE_TOPICS = [t for t in ALL_TOPICS if t != DML_TOPIC]
+# Topics a graded practice problem can be written against -- the Cookbook
+# query-recipe topics minus DML (grading requires read-only execution).
+# EXTRA_TOPICS are design/ops questions that don't fit single-SELECT
+# grading, so they stay interview-only (see module docstring).
+GRADEABLE_TOPICS = [t for t in COOKBOOK_TOPICS if t != DML_TOPIC]

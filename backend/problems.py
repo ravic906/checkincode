@@ -1085,6 +1085,1204 @@ PROBLEMS = [
             ORDER BY region;
         """,
     },
+
+    # ==================== Batch 2 ====================
+
+    # ---- Retrieving Records ----
+    {
+        "id": "easy-10-library-available-fiction",
+        "title": "Available Fiction Books",
+        "difficulty": "easy",
+        "topic": "Retrieving Records",
+        "tags": ["select", "where", "like"],
+        "description": (
+            "Return `book_id` and `title` for books whose `genre` starts "
+            "with 'Fic' (matches 'Fiction' and similar) AND are currently "
+            "`available`."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE books (
+                book_id INTEGER,
+                title VARCHAR,
+                genre VARCHAR,
+                available BOOLEAN
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO books VALUES
+            (1, 'The Silent Patient', 'Fiction', TRUE),
+            (2, 'A Brief History of Time', 'Non-Fiction', TRUE),
+            (3, 'Speculative Realms', 'Fictional Sagas', TRUE),
+            (4, 'Dune', 'Fiction', FALSE),
+            (5, 'Cosmos', 'Science', TRUE);
+        """,
+        "canonical_sql": """
+            SELECT book_id, title
+            FROM books
+            WHERE genre LIKE 'Fic%' AND available = TRUE;
+        """,
+    },
+    {
+        "id": "medium-15-and-or-precedence",
+        "title": "Premium or Long-Tenured Members Only",
+        "difficulty": "medium",
+        "topic": "Retrieving Records",
+        "tags": ["where", "and-or", "operator-precedence"],
+        "description": (
+            "Return `member_id`, `plan`, and `years_active` for gym "
+            "members who are either on the 'Premium' plan, OR have been "
+            "active for more than 3 years AND are on the 'Standard' plan. "
+            "(This is a classic AND/OR precedence trap -- think carefully "
+            "about where parentheses need to go.)"
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE members (
+                member_id INTEGER,
+                plan VARCHAR,
+                years_active INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO members VALUES
+            (1, 'Premium', 1),
+            (2, 'Standard', 5),
+            (3, 'Standard', 2),
+            (4, 'Basic', 6),
+            (5, 'Premium', 4);
+        """,
+        "canonical_sql": """
+            SELECT member_id, plan, years_active
+            FROM members
+            WHERE plan = 'Premium' OR (years_active > 3 AND plan = 'Standard');
+        """,
+    },
+    {
+        "id": "medium-16-not-in-null-trap",
+        "title": "Products Not in a Discontinued List (NULL Trap)",
+        "difficulty": "medium",
+        "topic": "Retrieving Records",
+        "tags": ["not-in", "null-handling", "subquery"],
+        "description": (
+            "The `discontinued_codes` table lists product codes that have "
+            "been discontinued -- but one row has a NULL `code` (a bad "
+            "data entry). Return `product_id` and `code` for products "
+            "whose `code` is NOT in the discontinued list. Careful: NOT "
+            "IN against a list containing NULL silently returns zero rows "
+            "in standard SQL unless you filter the NULL out first."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                code VARCHAR
+            );
+            CREATE TABLE discontinued_codes (
+                code VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 'A100'),
+            (2, 'A200'),
+            (3, 'A300'),
+            (4, 'A400');
+
+            INSERT INTO discontinued_codes VALUES
+            ('A200'),
+            (NULL);
+        """,
+        "canonical_sql": """
+            SELECT product_id, code
+            FROM products
+            WHERE code NOT IN (SELECT code FROM discontinued_codes WHERE code IS NOT NULL);
+        """,
+    },
+
+    # ---- Sorting Query Results ----
+    {
+        "id": "medium-17-sort-nulls-first",
+        "title": "Newest Reviews First, Unrated Products First",
+        "difficulty": "medium",
+        "topic": "Sorting Query Results",
+        "tags": ["sorting", "nulls-first"],
+        "description": (
+            "Return `product_id` and `rating` for all products, sorted so "
+            "that products with no rating yet (NULL) come FIRST, then the "
+            "rest sorted by `rating` descending."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                rating DECIMAL(2,1)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 4.5),
+            (2, NULL),
+            (3, 3.8),
+            (4, NULL),
+            (5, 4.9);
+        """,
+        "canonical_sql": """
+            SELECT product_id, rating
+            FROM products
+            ORDER BY rating DESC NULLS FIRST;
+        """,
+    },
+    {
+        "id": "easy-11-pagination-limit-offset",
+        "title": "Second Page of Products, 2 Per Page",
+        "difficulty": "easy",
+        "topic": "Sorting Query Results",
+        "tags": ["sorting", "limit", "offset"],
+        "description": (
+            "Return `product_id` and `product_name`, sorted by "
+            "`product_id` ascending, showing the SECOND page of results "
+            "when displaying 2 products per page (i.e. skip the first 2, "
+            "return the next 2)."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                product_name VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 'Chips'),
+            (2, 'Soda'),
+            (3, 'Cookies'),
+            (4, 'Namkeen'),
+            (5, 'Juice');
+        """,
+        "canonical_sql": """
+            SELECT product_id, product_name
+            FROM products
+            ORDER BY product_id
+            LIMIT 2 OFFSET 2;
+        """,
+    },
+    {
+        "id": "medium-18-sort-by-expression",
+        "title": "Sort by Total Price, Not a Selected Column",
+        "difficulty": "medium",
+        "topic": "Sorting Query Results",
+        "tags": ["sorting", "computed-column"],
+        "description": (
+            "Return `order_id`, `quantity`, and `unit_price` for all "
+            "orders, sorted descending by `quantity * unit_price` (the "
+            "total line value) -- even though that computed value itself "
+            "isn't one of the returned columns."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE order_items (
+                order_id INTEGER,
+                quantity INTEGER,
+                unit_price DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO order_items VALUES
+            (1, 3, 100.00),
+            (2, 1, 500.00),
+            (3, 10, 20.00),
+            (4, 2, 150.00);
+        """,
+        "canonical_sql": """
+            SELECT order_id, quantity, unit_price
+            FROM order_items
+            ORDER BY quantity * unit_price DESC;
+        """,
+    },
+
+    # ---- Working with Multiple Tables ----
+    {
+        "id": "medium-19-three-way-join",
+        "title": "Order Line Items With Customer and Product Names",
+        "difficulty": "medium",
+        "topic": "Working with Multiple Tables",
+        "tags": ["joins", "three-table-join"],
+        "description": (
+            "Join `order_items`, `orders`, `customers`, and `products` "
+            "together to return `order_id`, `customer_name`, "
+            "`product_name`, and `quantity` for every line item."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE customers (customer_id INTEGER, customer_name VARCHAR);
+            CREATE TABLE products (product_id INTEGER, product_name VARCHAR);
+            CREATE TABLE orders (order_id INTEGER, customer_id INTEGER);
+            CREATE TABLE order_items (order_id INTEGER, product_id INTEGER, quantity INTEGER);
+        """,
+        "seed_sql": """
+            INSERT INTO customers VALUES (1, 'Ananya Traders'), (2, 'Bharat Textiles');
+            INSERT INTO products VALUES (10, 'Chips'), (20, 'Soda');
+            INSERT INTO orders VALUES (100, 1), (101, 2);
+            INSERT INTO order_items VALUES (100, 10, 3), (100, 20, 1), (101, 10, 5);
+        """,
+        "canonical_sql": """
+            SELECT o.order_id, c.customer_name, p.product_name, oi.quantity
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.order_id
+            JOIN customers c ON o.customer_id = c.customer_id
+            JOIN products p ON oi.product_id = p.product_id;
+        """,
+    },
+    {
+        "id": "medium-20-self-join-same-category",
+        "title": "Pairs of Products in the Same Category",
+        "difficulty": "medium",
+        "topic": "Working with Multiple Tables",
+        "tags": ["self-join"],
+        "description": (
+            "Using a self-join on `products`, return pairs of DIFFERENT "
+            "products (`product_a`, `product_b`) that share the same "
+            "`category`. Each pair should appear only once (not twice in "
+            "reverse order) -- use the product IDs to break symmetry."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                product_name VARCHAR,
+                category VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 'Chips', 'Snacks'),
+            (2, 'Cookies', 'Snacks'),
+            (3, 'Namkeen', 'Snacks'),
+            (4, 'Soda', 'Beverages');
+        """,
+        "canonical_sql": """
+            SELECT a.product_name AS product_a, b.product_name AS product_b
+            FROM products a
+            JOIN products b ON a.category = b.category AND a.product_id < b.product_id;
+        """,
+    },
+    {
+        "id": "hard-6-full-outer-join-unmatched",
+        "title": "Students and Enrollments, Fully Unmatched Both Ways",
+        "difficulty": "hard",
+        "topic": "Working with Multiple Tables",
+        "tags": ["full-join", "outer-join"],
+        "description": (
+            "Some students haven't enrolled in any course, and one "
+            "enrollment references a `student_id` that doesn't exist in "
+            "`students` (orphaned data). Using a FULL OUTER JOIN, return "
+            "`student_id`, `student_name`, and `course` for every row from "
+            "both sides, matched or not (NULL where there's no match)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE students (student_id INTEGER, student_name VARCHAR);
+            CREATE TABLE enrollments (student_id INTEGER, course VARCHAR);
+        """,
+        "seed_sql": """
+            INSERT INTO students VALUES (1, 'Asha'), (2, 'Vikram'), (3, 'Priya');
+            INSERT INTO enrollments VALUES (1, 'SQL 101'), (2, 'Data Structures'), (99, 'Ghost Course');
+        """,
+        "canonical_sql": """
+            SELECT s.student_id, s.student_name, e.course
+            FROM students s
+            FULL OUTER JOIN enrollments e ON s.student_id = e.student_id;
+        """,
+    },
+
+    # ---- Metadata Queries ----
+    {
+        "id": "easy-12-metadata-table-exists",
+        "title": "Confirm a Table Exists in the Schema",
+        "difficulty": "easy",
+        "topic": "Metadata Queries",
+        "tags": ["metadata", "information-schema"],
+        "description": (
+            "Query `information_schema.tables` to return the "
+            "`table_name` of every table in the current schema whose name "
+            "starts with 'emp'."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (employee_id INTEGER);
+            CREATE TABLE employee_history (employee_id INTEGER);
+            CREATE TABLE departments (dept_id INTEGER);
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES (1);
+        """,
+        "canonical_sql": """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_name LIKE 'emp%';
+        """,
+    },
+    {
+        "id": "medium-21-metadata-count-columns",
+        "title": "Count Columns Per Table",
+        "difficulty": "medium",
+        "topic": "Metadata Queries",
+        "tags": ["metadata", "information-schema", "aggregation"],
+        "description": (
+            "Query `information_schema.columns` to return `table_name` "
+            "and the number of columns it has (as `column_count`), for "
+            "every table in the schema. Sort by `table_name`."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE employees (employee_id INTEGER, name VARCHAR, salary INTEGER);
+            CREATE TABLE departments (dept_id INTEGER, department_name VARCHAR);
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES (1, 'Asha', 90000);
+        """,
+        "canonical_sql": """
+            SELECT table_name, COUNT(*) AS column_count
+            FROM information_schema.columns
+            WHERE table_name IN ('employees', 'departments')
+            GROUP BY table_name
+            ORDER BY table_name;
+        """,
+    },
+
+    # ---- Working with Strings ----
+    {
+        "id": "medium-22-string-full-name-concat",
+        "title": "Concatenate First and Last Name",
+        "difficulty": "medium",
+        "topic": "Working with Strings",
+        "tags": ["strings", "concat"],
+        "description": (
+            "Some `last_name` values are NULL (single-name records). "
+            "Return `employee_id` and a `full_name` column combining "
+            "`first_name` and `last_name` with a space between them -- "
+            "when `last_name` is NULL, `full_name` should just be the "
+            "first name (no trailing space, no NULL result)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                first_name VARCHAR,
+                last_name VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, 'Asha', 'Rao'),
+            (2, 'Cher', NULL),
+            (3, 'Vikram', 'Shah');
+        """,
+        "canonical_sql": """
+            SELECT employee_id,
+                   TRIM(first_name || ' ' || COALESCE(last_name, '')) AS full_name
+            FROM employees;
+        """,
+    },
+    {
+        "id": "easy-13-string-upper-category",
+        "title": "Uppercase Product Categories",
+        "difficulty": "easy",
+        "topic": "Working with Strings",
+        "tags": ["strings", "upper"],
+        "description": (
+            "Return `product_id` and `category` converted to all "
+            "uppercase, as `category_upper`."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                category VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 'snacks'),
+            (2, 'Beverages'),
+            (3, 'dairy');
+        """,
+        "canonical_sql": """
+            SELECT product_id, UPPER(category) AS category_upper
+            FROM products;
+        """,
+    },
+    {
+        "id": "medium-23-string-length-filter",
+        "title": "Product Codes Longer Than 5 Characters",
+        "difficulty": "medium",
+        "topic": "Working with Strings",
+        "tags": ["strings", "length"],
+        "description": (
+            "Return `product_id` and `code` for products whose `code` is "
+            "longer than 5 characters."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE products (
+                product_id INTEGER,
+                code VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO products VALUES
+            (1, 'A100'),
+            (2, 'PROD-2024'),
+            (3, 'B22'),
+            (4, 'SKU-99001');
+        """,
+        "canonical_sql": """
+            SELECT product_id, code
+            FROM products
+            WHERE LENGTH(code) > 5;
+        """,
+    },
+
+    # ---- Working with Numbers ----
+    {
+        "id": "easy-14-numbers-absolute-delta",
+        "title": "Absolute Value of Account Balance Change",
+        "difficulty": "easy",
+        "topic": "Working with Numbers",
+        "tags": ["numbers", "abs"],
+        "description": (
+            "Return `transaction_id` and the absolute value of `delta` "
+            "(which can be negative for withdrawals) as `magnitude`."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE transactions (
+                transaction_id INTEGER,
+                delta DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO transactions VALUES
+            (1, 500.00),
+            (2, -200.50),
+            (3, -75.00),
+            (4, 1000.00);
+        """,
+        "canonical_sql": """
+            SELECT transaction_id, ABS(delta) AS magnitude
+            FROM transactions;
+        """,
+    },
+    {
+        "id": "medium-24-numbers-ceil-billing-units",
+        "title": "Round Up Data Usage to Whole Billing Units",
+        "difficulty": "medium",
+        "topic": "Working with Numbers",
+        "tags": ["numbers", "ceiling"],
+        "description": (
+            "A billing unit is 1 GB; partial usage still counts as a full "
+            "unit. Return `customer_id` and `gb_used` rounded UP to the "
+            "next whole number as `billed_units` (e.g. 2.1 GB bills as 3 "
+            "units)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE usage (
+                customer_id INTEGER,
+                gb_used DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO usage VALUES
+            (1, 2.1),
+            (2, 5.0),
+            (3, 0.3),
+            (4, 9.99);
+        """,
+        "canonical_sql": """
+            SELECT customer_id, CEIL(gb_used) AS billed_units
+            FROM usage;
+        """,
+    },
+    {
+        "id": "medium-25-numbers-percent-of-total",
+        "title": "Each Region's Share of Total Revenue",
+        "difficulty": "medium",
+        "topic": "Working with Numbers",
+        "tags": ["numbers", "arithmetic", "subquery"],
+        "description": (
+            "Return `region` and `revenue`, plus a `pct_of_total` column: "
+            "each region's revenue as a percentage of the sum of ALL "
+            "regions' revenue, rounded to 1 decimal place."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE region_revenue (
+                region VARCHAR,
+                revenue DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO region_revenue VALUES
+            ('North', 500.00),
+            ('South', 300.00),
+            ('East', 200.00);
+        """,
+        "canonical_sql": """
+            SELECT region, revenue,
+                   ROUND(revenue * 100.0 / (SELECT SUM(revenue) FROM region_revenue), 1) AS pct_of_total
+            FROM region_revenue;
+        """,
+    },
+
+    # ---- Date Arithmetic ----
+    {
+        "id": "easy-15-date-age-in-years",
+        "title": "Patient Age in Years",
+        "difficulty": "easy",
+        "topic": "Date Arithmetic",
+        "tags": ["dates", "date-diff"],
+        "description": (
+            "Treat 2024-07-15 as \"today\" (don't use CURRENT_DATE). "
+            "Return `patient_id` and `age_years`: the number of full "
+            "years between `birth_date` and 2024-07-15."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE patients (
+                patient_id INTEGER,
+                birth_date DATE
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO patients VALUES
+            (1, '1990-03-10'),
+            (2, '2000-12-25'),
+            (3, '1965-07-16');
+        """,
+        "canonical_sql": """
+            SELECT patient_id, DATE_DIFF('year', birth_date, DATE '2024-07-15') AS age_years
+            FROM patients;
+        """,
+    },
+    {
+        "id": "medium-26-date-subscription-expiry",
+        "title": "Subscription Expiry Date",
+        "difficulty": "medium",
+        "topic": "Date Arithmetic",
+        "tags": ["dates", "interval"],
+        "description": (
+            "Each subscription lasts `plan_months` months from "
+            "`start_date`. Return `subscription_id` and an "
+            "`expiry_date` column computed accordingly."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE subscriptions (
+                subscription_id INTEGER,
+                start_date DATE,
+                plan_months INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO subscriptions VALUES
+            (1, '2024-01-15', 1),
+            (2, '2024-02-01', 12),
+            (3, '2024-06-10', 3);
+        """,
+        "canonical_sql": """
+            SELECT subscription_id, start_date + (plan_months * INTERVAL 1 MONTH) AS expiry_date
+            FROM subscriptions;
+        """,
+    },
+    {
+        "id": "medium-27-date-weekend-orders",
+        "title": "Orders Placed on a Weekend",
+        "difficulty": "medium",
+        "topic": "Date Arithmetic",
+        "tags": ["dates", "dayofweek"],
+        "description": (
+            "Return `order_id` and `order_date` for orders placed on a "
+            "Saturday or Sunday."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE orders (
+                order_id INTEGER,
+                order_date DATE
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO orders VALUES
+            (1, '2024-07-08'),
+            (2, '2024-07-13'),
+            (3, '2024-07-14'),
+            (4, '2024-07-10');
+        """,
+        "canonical_sql": """
+            SELECT order_id, order_date
+            FROM orders
+            WHERE DAYOFWEEK(order_date) IN (0, 6);
+        """,
+    },
+
+    # ---- Date Manipulation ----
+    {
+        "id": "easy-16-date-extract-year",
+        "title": "Extract the Year From a Hire Date",
+        "difficulty": "easy",
+        "topic": "Date Manipulation",
+        "tags": ["dates", "extract"],
+        "description": (
+            "Return `employee_id` and a `hire_year` column: the year "
+            "portion of `hire_date`."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                hire_date DATE
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, '2019-05-10'),
+            (2, '2021-11-02'),
+            (3, '2023-01-30');
+        """,
+        "canonical_sql": """
+            SELECT employee_id, EXTRACT(YEAR FROM hire_date) AS hire_year
+            FROM employees;
+        """,
+    },
+    {
+        "id": "medium-28-date-last-day-of-month",
+        "title": "Last Day of the Billing Month",
+        "difficulty": "medium",
+        "topic": "Date Manipulation",
+        "tags": ["dates", "last-day"],
+        "description": (
+            "Return `invoice_id` and a `billing_month_end` column: the "
+            "last calendar day of the month that `invoice_date` falls in."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE invoices (
+                invoice_id INTEGER,
+                invoice_date DATE
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO invoices VALUES
+            (1, '2024-02-10'),
+            (2, '2024-04-01'),
+            (3, '2024-12-25');
+        """,
+        "canonical_sql": """
+            SELECT invoice_id, LAST_DAY(invoice_date) AS billing_month_end
+            FROM invoices;
+        """,
+    },
+    {
+        "id": "medium-29-date-format-string",
+        "title": "Format Order Dates as DD-Mon-YYYY",
+        "difficulty": "medium",
+        "topic": "Date Manipulation",
+        "tags": ["dates", "strftime", "formatting"],
+        "description": (
+            "Return `order_id` and a `formatted_date` column: "
+            "`order_date` formatted as e.g. '05-Jul-2024' (day, "
+            "3-letter month abbreviation, 4-digit year)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE orders (
+                order_id INTEGER,
+                order_date DATE
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO orders VALUES
+            (1, '2024-07-05'),
+            (2, '2024-01-20');
+        """,
+        "canonical_sql": """
+            SELECT order_id, STRFTIME(order_date, '%d-%b-%Y') AS formatted_date
+            FROM orders;
+        """,
+    },
+
+    # ---- Working with Ranges ----
+    {
+        "id": "easy-17-ranges-age-groups",
+        "title": "Bucket Customers Into Age Groups",
+        "difficulty": "easy",
+        "topic": "Working with Ranges",
+        "tags": ["ranges", "case"],
+        "description": (
+            "Return `customer_id`, `age`, and an `age_group` column: "
+            "'Minor' under 18, 'Adult' 18-59 inclusive, 'Senior' 60+."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE customers (
+                customer_id INTEGER,
+                age INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO customers VALUES
+            (1, 15),
+            (2, 34),
+            (3, 60),
+            (4, 72),
+            (5, 17);
+        """,
+        "canonical_sql": """
+            SELECT customer_id, age,
+                   CASE
+                       WHEN age < 18 THEN 'Minor'
+                       WHEN age BETWEEN 18 AND 59 THEN 'Adult'
+                       ELSE 'Senior'
+                   END AS age_group
+            FROM customers;
+        """,
+    },
+    {
+        "id": "medium-30-ranges-grade-bands",
+        "title": "Assign Letter Grades From Scores",
+        "difficulty": "medium",
+        "topic": "Working with Ranges",
+        "tags": ["ranges", "case", "between"],
+        "description": (
+            "Return `student_id`, `score`, and a `grade` column: 'A' for "
+            "90-100, 'B' for 80-89, 'C' for 70-79, 'F' below 70."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE scores (
+                student_id INTEGER,
+                score INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO scores VALUES
+            (1, 95),
+            (2, 82),
+            (3, 71),
+            (4, 55),
+            (5, 89);
+        """,
+        "canonical_sql": """
+            SELECT student_id, score,
+                   CASE
+                       WHEN score BETWEEN 90 AND 100 THEN 'A'
+                       WHEN score BETWEEN 80 AND 89 THEN 'B'
+                       WHEN score BETWEEN 70 AND 79 THEN 'C'
+                       ELSE 'F'
+                   END AS grade
+            FROM scores;
+        """,
+    },
+    {
+        "id": "hard-7-ranges-gaps-in-sequence",
+        "title": "Find Missing Invoice Numbers",
+        "difficulty": "hard",
+        "topic": "Working with Ranges",
+        "tags": ["ranges", "gaps-and-islands", "recursive-cte"],
+        "description": (
+            "Invoice numbers should be sequential from 1 to the highest "
+            "one issued, with no gaps -- but some are missing (voided and "
+            "never reused). Return the `invoice_number` of every missing "
+            "number in that range, sorted ascending."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE invoices (
+                invoice_number INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO invoices VALUES
+            (1), (2), (4), (5), (8);
+        """,
+        "canonical_sql": """
+            WITH RECURSIVE seq(n) AS (
+                SELECT 1
+                UNION ALL
+                SELECT n + 1 FROM seq WHERE n < (SELECT MAX(invoice_number) FROM invoices)
+            )
+            SELECT n AS invoice_number
+            FROM seq
+            WHERE n NOT IN (SELECT invoice_number FROM invoices)
+            ORDER BY invoice_number;
+        """,
+    },
+
+    # ---- Advanced Searching ----
+    {
+        "id": "medium-31-advanced-exists",
+        "title": "Customers With at Least One Big Order",
+        "difficulty": "medium",
+        "topic": "Advanced Searching",
+        "tags": ["exists", "subquery"],
+        "description": (
+            "Using EXISTS, return `customer_id` and `customer_name` for "
+            "customers who have placed at least one order over 1000."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE customers (customer_id INTEGER, customer_name VARCHAR);
+            CREATE TABLE orders (order_id INTEGER, customer_id INTEGER, amount DECIMAL(10,2));
+        """,
+        "seed_sql": """
+            INSERT INTO customers VALUES (1, 'Ananya Traders'), (2, 'Bharat Textiles'), (3, 'Chennai Foods');
+            INSERT INTO orders VALUES (100, 1, 1500.00), (101, 1, 200.00), (102, 2, 300.00), (103, 3, 50.00);
+        """,
+        "canonical_sql": """
+            SELECT c.customer_id, c.customer_name
+            FROM customers c
+            WHERE EXISTS (
+                SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id AND o.amount > 1000
+            );
+        """,
+    },
+    {
+        "id": "hard-8-advanced-greater-than-all",
+        "title": "Employees Earning More Than Every Sales Rep",
+        "difficulty": "hard",
+        "topic": "Advanced Searching",
+        "tags": ["subquery", "all"],
+        "description": (
+            "Return `employee_id`, `full_name`, `department`, and "
+            "`salary` for employees who earn more than EVERY employee in "
+            "the 'Sales' department (using `> ALL`, not MAX)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                full_name VARCHAR,
+                department VARCHAR,
+                salary INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, 'Asha Rao', 'Engineering', 120000),
+            (2, 'Vikram Shah', 'Engineering', 75000),
+            (3, 'Priya Nair', 'Sales', 62000),
+            (4, 'Karan Mehta', 'Sales', 70000),
+            (5, 'Divya Iyer', 'Marketing', 95000);
+        """,
+        "canonical_sql": """
+            SELECT employee_id, full_name, department, salary
+            FROM employees
+            WHERE salary > ALL (SELECT salary FROM employees WHERE department = 'Sales');
+        """,
+    },
+    {
+        "id": "hard-9-advanced-highest-avg-department",
+        "title": "The Department With the Highest Average Salary",
+        "difficulty": "hard",
+        "topic": "Advanced Searching",
+        "tags": ["subquery", "aggregation", "correlated-subquery"],
+        "description": (
+            "Return the single `department` with the highest average "
+            "salary (just the department name, one row)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                department VARCHAR,
+                salary INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, 'Engineering', 95000),
+            (2, 'Engineering', 88000),
+            (3, 'Sales', 62000),
+            (4, 'Sales', 70000),
+            (5, 'Marketing', 120000);
+        """,
+        "canonical_sql": """
+            SELECT department
+            FROM employees
+            GROUP BY department
+            ORDER BY AVG(salary) DESC
+            LIMIT 1;
+        """,
+    },
+
+    # ---- Reporting and Warehousing ----
+    {
+        "id": "medium-32-reporting-count-distinct-buyers",
+        "title": "Distinct Buyers Per Product",
+        "difficulty": "medium",
+        "topic": "Reporting and Warehousing",
+        "tags": ["aggregation", "count-distinct"],
+        "description": (
+            "The `purchases` table can have the same customer buying the "
+            "same product more than once. Return `product_id` and the "
+            "number of DISTINCT customers who bought it, as `buyer_count`."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE purchases (
+                purchase_id INTEGER,
+                customer_id INTEGER,
+                product_id INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO purchases VALUES
+            (1, 100, 1), (2, 100, 1), (3, 200, 1), (4, 300, 2);
+        """,
+        "canonical_sql": """
+            SELECT product_id, COUNT(DISTINCT customer_id) AS buyer_count
+            FROM purchases
+            GROUP BY product_id;
+        """,
+    },
+    {
+        "id": "hard-10-reporting-month-over-month",
+        "title": "Month-Over-Month Revenue Change",
+        "difficulty": "hard",
+        "topic": "Reporting and Warehousing",
+        "tags": ["window-functions", "lag"],
+        "description": (
+            "Return `month`, `revenue`, and a `change_from_prior_month` "
+            "column using LAG() -- the difference between this month's "
+            "revenue and the previous month's (NULL for the first month)."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE monthly_revenue (
+                month DATE,
+                revenue DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO monthly_revenue VALUES
+            ('2024-01-01', 1000.00),
+            ('2024-02-01', 1200.00),
+            ('2024-03-01', 900.00);
+        """,
+        "canonical_sql": """
+            SELECT month, revenue,
+                   revenue - LAG(revenue) OVER (ORDER BY month) AS change_from_prior_month
+            FROM monthly_revenue
+            ORDER BY month;
+        """,
+    },
+    {
+        "id": "hard-11-reporting-ntile-quartiles",
+        "title": "Bucket Customers Into Spending Quartiles",
+        "difficulty": "hard",
+        "topic": "Reporting and Warehousing",
+        "tags": ["window-functions", "ntile"],
+        "description": (
+            "Return `customer_id`, `total_spent`, and a `quartile` "
+            "column using NTILE(4) -- bucketing customers into 4 roughly "
+            "equal groups by `total_spent` descending (1 = top spenders)."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE customer_spend (
+                customer_id INTEGER,
+                total_spent DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO customer_spend VALUES
+            (1, 5000.00), (2, 4000.00), (3, 3000.00), (4, 2000.00),
+            (5, 1000.00), (6, 900.00), (7, 800.00), (8, 700.00);
+        """,
+        "canonical_sql": """
+            SELECT customer_id, total_spent,
+                   NTILE(4) OVER (ORDER BY total_spent DESC) AS quartile
+            FROM customer_spend
+            ORDER BY total_spent DESC;
+        """,
+    },
+
+    # ---- Hierarchical Queries ----
+    {
+        "id": "medium-33-hierarchy-root-nodes",
+        "title": "Employees With No Manager",
+        "difficulty": "medium",
+        "topic": "Hierarchical Queries",
+        "tags": ["hierarchy", "self-reference"],
+        "description": (
+            "Return `employee_id` and `name` for employees who have no "
+            "manager (the top of the org chart -- `manager_id` is NULL)."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                name VARCHAR,
+                manager_id INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, 'Meera CEO', NULL),
+            (2, 'Asha Rao', 1),
+            (3, 'Vikram Shah', 1);
+        """,
+        "canonical_sql": """
+            SELECT employee_id, name
+            FROM employees
+            WHERE manager_id IS NULL;
+        """,
+    },
+    {
+        "id": "hard-12-hierarchy-count-descendants",
+        "title": "Total Headcount Under Each Manager",
+        "difficulty": "hard",
+        "topic": "Hierarchical Queries",
+        "tags": ["recursive-cte", "hierarchy", "aggregation"],
+        "description": (
+            "Using a recursive CTE, return `manager_id` and the TOTAL "
+            "number of employees reporting up to them at any depth (not "
+            "just direct reports), as `total_reports`. Only include "
+            "managers who have at least one report. Sort by `manager_id`."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE employees (
+                employee_id INTEGER,
+                manager_id INTEGER
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO employees VALUES
+            (1, NULL),
+            (2, 1),
+            (3, 1),
+            (4, 2),
+            (5, 2),
+            (6, 4);
+        """,
+        "canonical_sql": """
+            WITH RECURSIVE reports AS (
+                SELECT employee_id AS manager_id, employee_id AS report_id
+                FROM employees
+                UNION ALL
+                SELECT r.manager_id, e.employee_id
+                FROM employees e
+                JOIN reports r ON e.manager_id = r.report_id
+            )
+            SELECT manager_id, COUNT(*) - 1 AS total_reports
+            FROM reports
+            GROUP BY manager_id
+            HAVING COUNT(*) - 1 > 0
+            ORDER BY manager_id;
+        """,
+    },
+
+    # ---- Odds and Ends ----
+    {
+        "id": "easy-18-oddsends-coalesce-default",
+        "title": "Default Missing Phone Numbers",
+        "difficulty": "easy",
+        "topic": "Odds and Ends",
+        "tags": ["coalesce", "null-handling"],
+        "description": (
+            "Return `customer_id` and `phone`, substituting the text "
+            "'Not Provided' for any NULL `phone` value."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE customers (
+                customer_id INTEGER,
+                phone VARCHAR
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO customers VALUES
+            (1, '9876543210'),
+            (2, NULL),
+            (3, '9123456780');
+        """,
+        "canonical_sql": """
+            SELECT customer_id, COALESCE(phone, 'Not Provided') AS phone
+            FROM customers;
+        """,
+    },
+    {
+        "id": "medium-34-oddsends-multi-case",
+        "title": "Categorize Orders by Size",
+        "difficulty": "medium",
+        "topic": "Odds and Ends",
+        "tags": ["case"],
+        "description": (
+            "Return `order_id`, `total_amount`, and a `size_category` "
+            "column: 'Small' under 100, 'Medium' 100-499, 'Large' 500+."
+        ),
+        "order_matters": False,
+        "schema_sql": """
+            CREATE TABLE orders (
+                order_id INTEGER,
+                total_amount DECIMAL(10,2)
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO orders VALUES
+            (1, 45.00),
+            (2, 250.00),
+            (3, 900.00),
+            (4, 99.99);
+        """,
+        "canonical_sql": """
+            SELECT order_id, total_amount,
+                   CASE
+                       WHEN total_amount < 100 THEN 'Small'
+                       WHEN total_amount < 500 THEN 'Medium'
+                       ELSE 'Large'
+                   END AS size_category
+            FROM orders;
+        """,
+    },
+    {
+        "id": "hard-13-oddsends-latest-per-group",
+        "title": "Keep Only the Latest Status Per Order",
+        "difficulty": "hard",
+        "topic": "Odds and Ends",
+        "tags": ["deduplication", "window-functions", "qualify"],
+        "description": (
+            "The `order_status_log` table has multiple status updates per "
+            "order over time. Return `order_id`, `status`, and "
+            "`updated_at` for only the MOST RECENT status update per "
+            "order. Sort by `order_id`."
+        ),
+        "order_matters": True,
+        "schema_sql": """
+            CREATE TABLE order_status_log (
+                order_id INTEGER,
+                status VARCHAR,
+                updated_at TIMESTAMP
+            );
+        """,
+        "seed_sql": """
+            INSERT INTO order_status_log VALUES
+            (1, 'Placed', '2024-06-01 10:00:00'),
+            (1, 'Shipped', '2024-06-02 09:00:00'),
+            (1, 'Delivered', '2024-06-05 14:00:00'),
+            (2, 'Placed', '2024-06-03 11:00:00'),
+            (2, 'Shipped', '2024-06-04 08:00:00');
+        """,
+        "canonical_sql": """
+            SELECT order_id, status, updated_at
+            FROM order_status_log
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY updated_at DESC) = 1
+            ORDER BY order_id;
+        """,
+    },
 ]
 
 
