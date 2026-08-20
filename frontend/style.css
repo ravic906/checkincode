@@ -47,11 +47,12 @@ body {
   height: 30px;
   flex-shrink: 0;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), var(--gold));
+  background: linear-gradient(135deg, #1a0f0c, #2b1310);
+  border: 1px solid rgba(255, 107, 61, 0.35);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 10px -4px rgba(79, 140, 255, 0.5);
+  box-shadow: 0 4px 12px -4px rgba(227, 40, 58, 0.55);
 }
 .brand-mark svg { width: 18px; height: 18px; }
 
@@ -450,15 +451,41 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 /* Responsive: tablet and below -- sidebar stacks above the workspace
    instead of sitting beside it, so there's no fixed-width column fighting
    a narrow viewport. */
+.mobile-filters-toggle { display: none; }
+
 @media (max-width: 768px) {
   .layout { flex-direction: column; overflow-y: auto; }
   .sidebar {
     width: 100%;
-    max-height: 40vh;
+    max-height: 55vh;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .workspace { overflow-y: visible; }
+  /* Empty-state ("pick a problem") shouldn't force the workspace to fill
+     the rest of the viewport -- let it size to its own content instead,
+     so there's no big dead gap below the problem list before anything
+     is selected. Once a problem loads, its real content (schema, editor,
+     results) naturally determines the height anyway. */
+  .workspace { overflow-y: visible; flex: none; }
+
+  .mobile-filters-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mobile-filters-toggle .chevron { color: var(--muted); transition: transform 0.15s; }
+  .mobile-filters-toggle.open .chevron { transform: rotate(180deg); }
+  .filters { display: none; }
+  .filters.mobile-open { display: flex; }
 
   .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .topbar-right { flex-wrap: wrap; gap: 8px; width: 100%; justify-content: flex-end; }

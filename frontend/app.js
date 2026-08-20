@@ -48,12 +48,25 @@ function setTutorEnabled(enabled) {
   localStorage.setItem("sqlpractice_tutor_enabled", String(enabled));
 }
 
+let _onPracticeScreen = false;
+
+function updateResetProgressVisibility() {
+  // Reset Progress only makes sense (a) while on the practice screen,
+  // where there's actually something to reset, and (b) once signed in --
+  // an anonymous browser id's "progress" isn't a real account, so
+  // offering to reset it before sign-in is just confusing.
+  const signedIn = typeof isSignedIn === "function" && isSignedIn();
+  document.getElementById("resetProgressBtn").style.display =
+    (_onPracticeScreen && signedIn) ? "inline-block" : "none";
+}
+
 function showHome() {
   document.getElementById("homeScreen").style.display = "flex";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "none";
   document.getElementById("tutorToggleWrap").style.display = "none";
-  document.getElementById("resetProgressBtn").style.display = "none";
+  _onPracticeScreen = false;
+  updateResetProgressVisibility();
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
@@ -61,14 +74,16 @@ function showSqlTrack() {
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
   document.getElementById("tutorToggleWrap").style.display = "flex";
-  document.getElementById("resetProgressBtn").style.display = "inline-block";
+  _onPracticeScreen = true;
+  updateResetProgressVisibility();
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "flex";
   document.getElementById("tutorToggleWrap").style.display = "none";
-  document.getElementById("resetProgressBtn").style.display = "none";
+  _onPracticeScreen = false;
+  updateResetProgressVisibility();
 }
 
 async function refreshTierBadge() {
@@ -479,6 +494,7 @@ async function refreshIdentityDependentState() {
     }
   }
   _wasSignedIn = nowSignedIn;
+  updateResetProgressVisibility();
 
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
@@ -521,6 +537,12 @@ async function init() {
   tutorToggle.onchange = () => setTutorEnabled(tutorToggle.checked);
 
   document.getElementById("resetProgressBtn").onclick = resetProgress;
+
+  const mobileFiltersToggle = document.getElementById("mobileFiltersToggle");
+  mobileFiltersToggle.onclick = () => {
+    document.getElementById("filtersPanel").classList.toggle("mobile-open");
+    mobileFiltersToggle.classList.toggle("open");
+  };
 
   document.getElementById("brandHome").onclick = showHome;
   document.getElementById("trackSql").onclick = showSqlTrack;
