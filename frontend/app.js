@@ -41,6 +41,11 @@ let monacoEditor = null;
 let followupState = null; // { studentQuery, expectedPreview, actualPreview, error, conversation: [{role, content}] }
 
 function getTutorEnabled() {
+  // Explain is a signed-in feature -- the toggle that controls it is
+  // hidden pre-sign-in (see updateSignInGatedUI), so don't silently keep
+  // requesting explanations behind the scenes for a control the user
+  // can't see or turn off.
+  if (typeof isSignedIn !== "function" || !isSignedIn()) return false;
   const v = localStorage.getItem("sqlpractice_tutor_enabled");
   return v === null ? true : v === "true";
 }
@@ -50,40 +55,39 @@ function setTutorEnabled(enabled) {
 
 let _onPracticeScreen = false;
 
-function updateResetProgressVisibility() {
-  // Reset Progress only makes sense (a) while on the practice screen,
-  // where there's actually something to reset, and (b) once signed in --
-  // an anonymous browser id's "progress" isn't a real account, so
-  // offering to reset it before sign-in is just confusing.
+function updateSignInGatedUI() {
+  // Reset Progress and the Explain toggle only make sense (a) while on
+  // the practice screen, where there's actually something to reset/
+  // explain, and (b) once signed in -- an anonymous browser id isn't a
+  // real account, so offering account-flavored controls before sign-in
+  // is just confusing.
   const signedIn = typeof isSignedIn === "function" && isSignedIn();
-  document.getElementById("resetProgressBtn").style.display =
-    (_onPracticeScreen && signedIn) ? "inline-block" : "none";
+  const show = _onPracticeScreen && signedIn;
+  document.getElementById("resetProgressBtn").style.display = show ? "inline-block" : "none";
+  document.getElementById("tutorToggleWrap").style.display = show ? "flex" : "none";
 }
 
 function showHome() {
   document.getElementById("homeScreen").style.display = "flex";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "none";
-  document.getElementById("tutorToggleWrap").style.display = "none";
   _onPracticeScreen = false;
-  updateResetProgressVisibility();
+  updateSignInGatedUI();
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
-  document.getElementById("tutorToggleWrap").style.display = "flex";
   _onPracticeScreen = true;
-  updateResetProgressVisibility();
+  updateSignInGatedUI();
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "flex";
-  document.getElementById("tutorToggleWrap").style.display = "none";
   _onPracticeScreen = false;
-  updateResetProgressVisibility();
+  updateSignInGatedUI();
 }
 
 async function refreshTierBadge() {
@@ -494,7 +498,7 @@ async function refreshIdentityDependentState() {
     }
   }
   _wasSignedIn = nowSignedIn;
-  updateResetProgressVisibility();
+  updateSignInGatedUI();
 
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
