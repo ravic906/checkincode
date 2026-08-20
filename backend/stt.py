@@ -23,7 +23,7 @@ import requests
 
 STT_API_BASE = os.environ.get("STT_API_BASE", "https://api.deepinfra.com/v1/openai")
 STT_API_KEY = os.environ.get("STT_API_KEY", "")
-STT_MODEL = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
+STT_MODEL = os.environ.get("STT_MODEL", "openai/whisper-large-v3-turbo")
 
 
 def transcribe(audio_bytes: bytes, filename: str) -> str:
