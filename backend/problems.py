@@ -24,12 +24,19 @@ startup (see main.py's _EXPECTED_CACHE), so a canonical query tied to "today"
 would silently drift out of sync with itself after the day changes.
 """
 
+import difflib
 import json
 import uuid
 
 import db
 import sandbox
 import topics
+
+# Above this title-similarity ratio, a draft is treated as a near-duplicate
+# of an existing problem and rejected -- catches "Employees Earning More
+# Than Their Manager" vs "Employees Who Earn More Than Their Manager"
+# style near-misses that a plain string-equality check would let through.
+DUPLICATE_TITLE_THRESHOLD = 0.82
 
 PROBLEMS = [
     {
@@ -2368,6 +2375,18 @@ def list_all_live_problems():
     return [dict(r) for r in rows]
 
 
+def list_existing_titles() -> list[str]:
+    """Titles of every problem that already exists -- live or still
+    awaiting review. Fed into the batch-generation prompt so the model
+    knows what scenarios are already taken, and used for the code-level
+    duplicate check in insert_pending_draft (a prompt instruction alone
+    isn't reliable enough to skip on its own)."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT title FROM problems WHERE status IN ('live', 'pending_review')")
+            return [row[0] for row in cur.fetchall()]
+
+
 def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, user_id: str | None = None):
     query = "SELECT id, title, difficulty, topic, tags, is_free FROM problems WHERE status = 'live'"
     params = []
@@ -2462,6 +2481,11 @@ def insert_pending_draft(draft: dict) -> str:
 
     if draft["topic"] not in topics.GRADEABLE_TOPICS:
         raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic (DML problems aren't supported).")
+
+    for existing_title in list_existing_titles():
+        ratio = difflib.SequenceMatcher(None, draft["title"].lower(), existing_title.lower()).ratio()
+        if ratio >= DUPLICATE_TITLE_THRESHOLD:
+            raise InvalidDraftProblem(f"Draft title '{draft['title']}' is too similar to existing problem '{existing_title}' ({ratio:.2f}).")
 
     try:
         sandbox.validate_student_sql(draft["canonical_sql"])

@@ -598,7 +598,12 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
     target_topics = req.topics or topics.GRADEABLE_TOPICS
 
     try:
-        result = llm.generate_problem_batch(user_id="admin", topics=target_topics, count=req.count)
+        result = llm.generate_problem_batch(
+            user_id="admin",
+            topics=target_topics,
+            count=req.count,
+            existing_titles=problems_module.list_existing_titles(),
+        )
     except Exception as e:
         raise HTTPException(502, f"Couldn't generate problems right now ({e}).")
 

@@ -443,6 +443,27 @@ PROBLEM_BATCH_SYSTEM_PROMPT = (
     "(Molinaro) -- realistic scenarios, and seed data that includes NULLs "
     "and/or duplicate rows where it makes the problem meaningfully harder "
     "(not just for the sake of it), like real analyst data.\n\n"
+    "Variety matters as much as correctness. Vary the business domain "
+    "across the batch (don't default to employees/departments for "
+    "everything -- draw from e-commerce, healthcare, banking/fintech, "
+    "logistics, SaaS subscriptions, education, hospitality, etc.), and "
+    "vary table/column names and the specific scenario even within the "
+    "same topic. Do not reuse a scenario, table shape, or phrasing you've "
+    "already used earlier in this same batch.\n\n"
+    "Include a meaningful fraction (roughly a third) as deliberate 'trick' "
+    "problems -- ones that look straightforward but have a real gotcha a "
+    "candidate would plausibly get wrong in an interview: a NOT IN list "
+    "that silently returns zero rows because it contains a NULL, a JOIN "
+    "that quietly duplicates rows before an aggregate runs over them, "
+    "COUNT(column) vs COUNT(*) disagreeing because of NULLs, integer "
+    "division truncating when the candidate expected a decimal, a LEFT "
+    "JOIN condition placed in WHERE instead of ON silently turning it into "
+    "an INNER JOIN, GROUP BY with a non-aggregated column that only some "
+    "engines allow, or similar real gotchas -- not artificially obscure "
+    "puzzles, just the traps that actually bite people. Tag these with "
+    "\"trap\" in addition to their normal tags, and make sure the "
+    "description doesn't give the gotcha away -- the student should only "
+    "discover it by getting the wrong answer and thinking through why.\n\n"
     "Every problem MUST be gradeable by running a single read-only query "
     "and diffing its output -- this is a hard platform constraint, not a "
     "style preference. That means:\n"
@@ -468,14 +489,19 @@ PROBLEM_BATCH_SYSTEM_PROMPT = (
 )
 
 
-def generate_problem_batch(*, user_id: str, topics: list[str], count: int) -> dict:
+def generate_problem_batch(*, user_id: str, topics: list[str], count: int, existing_titles: list[str] | None = None) -> dict:
     """
     Drafts `count` new practice problems spread across `topics` (DML is
     never one of them -- see topics.GRADEABLE_TOPICS). Returns
     {"problems": [...], "usage": {...}}. Callers MUST still run each
     draft's canonical_sql through sandbox.validate_student_sql before
     storing it -- this is a second, code-level check independent of
-    whether the model actually followed the prompt.
+    whether the model actually followed the prompt. `existing_titles`
+    (every problem already live or pending review) is fed back in so the
+    model avoids re-deriving a scenario that's already in the bank --
+    insert_pending_draft() also re-checks this with a code-level
+    similarity threshold, since a prompt instruction alone isn't reliable
+    enough to skip on its own.
     """
     user_prompt = (
         f"Draft {count} new practice problems spread across these topics "
@@ -483,6 +509,12 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int) -> di
         "Mix difficulties (easy/medium/hard) across the batch rather than "
         "making them all one level."
     )
+    if existing_titles:
+        titles_block = "\n".join(f"- {t}" for t in existing_titles)
+        user_prompt += (
+            "\n\nThese problems already exist -- do not draft anything "
+            "that's the same scenario under a different name:\n" + titles_block
+        )
     messages = [
         {"role": "system", "content": PROBLEM_BATCH_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
