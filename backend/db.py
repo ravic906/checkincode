@@ -84,8 +84,16 @@ def init_schema():
                     canonical_sql TEXT NOT NULL,
                     order_matters BOOLEAN NOT NULL DEFAULT FALSE,
                     status TEXT NOT NULL DEFAULT 'live',
+                    is_free BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
+            """)
+            # Migration: `problems` already existed in prod before is_free was
+            # added -- CREATE TABLE IF NOT EXISTS above won't add a column to
+            # an existing table, so do it explicitly (idempotent, no-ops if
+            # the column's already there).
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS is_free BOOLEAN NOT NULL DEFAULT FALSE
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS content_cadence (
@@ -98,6 +106,19 @@ def init_schema():
                 INSERT INTO content_cadence (id, last_batch_generated_at)
                 VALUES (1, NULL)
                 ON CONFLICT (id) DO NOTHING
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS submissions (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    problem_id TEXT NOT NULL,
+                    correct BOOLEAN NOT NULL,
+                    submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_submissions_user_problem
+                ON submissions (user_id, problem_id)
             """)
 
 

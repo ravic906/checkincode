@@ -2316,6 +2316,31 @@ def seed_if_empty():
                 )
 
 
+# Curated free-tier sample -- ~5% of the current 65-problem bank (4
+# problems), deliberately spread across difficulty and topic so a free
+# user gets a real taste of the platform rather than 4 near-identical
+# easy problems. A fixed curated list (not a recomputed percentage) so
+# which problems are free stays stable and intentional as the bank grows
+# toward 150 -- add to this set by hand if/when more free slots are wanted.
+FREE_PROBLEM_IDS = {
+    "easy-1-filter-active-employees",       # Retrieving Records, easy
+    "easy-4-email-domains",                 # Working with Strings, easy
+    "medium-1-customers-without-orders",    # Working with Multiple Tables, medium
+    "hard-3-rank-salary-in-department",     # Reporting and Warehousing, hard (window functions)
+}
+
+
+def mark_free_problems():
+    """Idempotent: (re-)marks FREE_PROBLEM_IDS as is_free=TRUE. Safe to run
+    on every startup, including for problems added after the initial seed."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE problems SET is_free = TRUE WHERE id = ANY(%s)",
+                (list(FREE_PROBLEM_IDS),),
+            )
+
+
 def get_problem(problem_id: str):
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
@@ -2334,8 +2359,8 @@ def list_all_live_problems():
     return [dict(r) for r in rows]
 
 
-def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None):
-    query = "SELECT id, title, difficulty, topic, tags FROM problems WHERE status = 'live'"
+def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, user_id: str | None = None):
+    query = "SELECT id, title, difficulty, topic, tags, is_free FROM problems WHERE status = 'live'"
     params = []
     if difficulty:
         query += " AND difficulty = %s"
@@ -2352,7 +2377,42 @@ def list_problems_summary(difficulty: str | None = None, tag: str | None = None,
 
     if tag:
         rows = [r for r in rows if tag in r["tags"]]
+
+    if user_id:
+        solved = get_solved_problem_ids(user_id)
+        for r in rows:
+            r["solved"] = r["id"] in solved
+    else:
+        for r in rows:
+            r["solved"] = False
+
     return rows
+
+
+def record_submission(user_id: str, problem_id: str, correct: bool):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO submissions (user_id, problem_id, correct) VALUES (%s,%s,%s)",
+                (user_id, problem_id, correct),
+            )
+
+
+def get_solved_problem_ids(user_id: str) -> set:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT problem_id FROM submissions WHERE user_id = %s AND correct = TRUE",
+                (user_id,),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+
+def reset_user_submissions(user_id: str) -> int:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM submissions WHERE user_id = %s", (user_id,))
+            return cur.rowcount
 
 
 class InvalidDraftProblem(Exception):

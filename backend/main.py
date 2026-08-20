@@ -65,6 +65,7 @@ def _startup():
     if db.DATABASE_URL:
         db.init_schema()
         problems_module.seed_if_empty()
+        problems_module.mark_free_problems()
         for p in problems_module.list_all_live_problems():
             cols, rows, _ = sandbox.compute_expected_output(p)
             _EXPECTED_CACHE[p["id"]] = (cols, rows)
@@ -117,15 +118,29 @@ class InterviewEndRequest(BaseModel):
 
 
 @app.get("/api/problems")
-def api_list_problems(difficulty: str | None = None, tag: str | None = None, topic: str | None = None):
-    return {"problems": list_problems_summary(difficulty=difficulty, tag=tag, topic=topic)}
+def api_list_problems(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, x_user_id: str = Header(default=None)):
+    user_id = x_user_id or str(uuid.uuid4())
+    tier = _get_usage(user_id)["tier"]
+    problems = list_problems_summary(difficulty=difficulty, tag=tag, topic=topic, user_id=x_user_id)
+    for p in problems:
+        p["locked"] = not p["is_free"] and tier != "paid"
+    return {"problems": problems}
 
 
 @app.get("/api/problems/{problem_id}")
-def api_get_problem(problem_id: str):
+def api_get_problem(problem_id: str, x_user_id: str = Header(default=None)):
     p = get_problem(problem_id)
     if not p:
         raise HTTPException(404, "Problem not found")
+
+    user_id = x_user_id or str(uuid.uuid4())
+    tier = _get_usage(user_id)["tier"]
+    if not p["is_free"] and tier != "paid":
+        raise HTTPException(
+            402,
+            "This problem is part of the Pro problem bank (₹199/mo). "
+            "Free tier includes a curated sample -- upgrade to unlock all problems.",
+        )
 
     con = duckdb.connect(":memory:", config={"enable_external_access": False})
     try:
@@ -170,6 +185,17 @@ def api_usage(x_user_id: str = Header(default=None)):
     }
 
 
+@app.delete("/api/submissions")
+def api_reset_submissions(x_user_id: str = Header(default=None)):
+    """Wipes all of the requesting user's submission history (solved
+    status resets to nothing). Irreversible -- the frontend confirms with
+    the user before calling this."""
+    if not x_user_id:
+        raise HTTPException(400, "X-User-Id header required")
+    deleted = problems_module.reset_user_submissions(x_user_id)
+    return {"deleted": deleted}
+
+
 @app.post("/api/dev/upgrade")
 def api_dev_upgrade(x_user_id: str = Header(default=None)):
     """Stand-in for a real payment webhook. Flips the user to the paid tier."""
@@ -200,6 +226,13 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
     if not problem:
         raise HTTPException(404, "Problem not found")
 
+    if not problem["is_free"] and u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "This problem is part of the Pro problem bank (₹199/mo). "
+            "Free tier includes a curated sample -- upgrade to unlock all problems.",
+        )
+
     u["submissions"] += 1
 
     result = {
@@ -227,6 +260,8 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
         result["actual_preview"] = _preview(columns, [[sandbox._normalize_cell(v) for v in r] for r in rows])
         if not is_correct:
             result["error"] = diff
+
+    problems_module.record_submission(user_id, problem["id"], result["correct"])
 
     if result["correct"]:
         return result
