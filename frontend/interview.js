@@ -21,6 +21,16 @@ function formatTime(totalSeconds) {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+// Firefox fills range inputs natively via ::-moz-range-progress, but
+// Chrome/Safari/Edge don't -- they just render whatever `background` is
+// set on the element, so the "filled" portion has to be computed and
+// painted as a hard-stop gradient by hand.
+function updateDurationSliderFill(slider) {
+  const min = Number(slider.min), max = Number(slider.max), val = Number(slider.value);
+  const pct = ((val - min) / (max - min)) * 100;
+  slider.style.background = `linear-gradient(90deg, var(--gold) 0%, var(--gold-2) ${pct}%, var(--studio-border) ${pct}%, var(--studio-border) 100%)`;
+}
+
 // The active session_id lives in localStorage so a page reload, browser
 // crash, or tab close-and-reopen can reconnect to the same interview --
 // the actual state lives in Postgres server-side, this is just the pointer.
@@ -176,8 +186,11 @@ function renderInterviewSetupScreen() {
     });
   });
 
-  document.getElementById("durationSlider").oninput = (e) => {
+  const durationSlider = document.getElementById("durationSlider");
+  updateDurationSliderFill(durationSlider);
+  durationSlider.oninput = (e) => {
     document.getElementById("durationValue").textContent = `${e.target.value} min`;
+    updateDurationSliderFill(e.target);
   };
 
   document.getElementById("resumeFile").onchange = async (e) => {

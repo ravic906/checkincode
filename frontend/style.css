@@ -583,7 +583,10 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   width: 100%;
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--gold), var(--gold-2));
+  /* background is set inline via JS per the selected value -- see
+     updateDurationSliderFill() in interview.js -- so the filled portion
+     (gold) vs. remaining track (dark) reflects the actual selection. */
+  background: var(--studio-border);
   cursor: pointer;
   margin: 4px 0;
 }
@@ -607,10 +610,15 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
-.duration-slider::-moz-range-track {
+.duration-slider::-moz-range-progress {
   height: 4px;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--gold), var(--gold-2));
+}
+.duration-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--studio-border);
 }
 
 .start-interview-btn {
