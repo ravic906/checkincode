@@ -73,16 +73,15 @@ async function refreshTierBadge() {
   const badge = document.getElementById("tierBadge");
   badge.classList.toggle("paid", usage.tier === "paid");
   if (usage.tier === "paid") {
-    badge.innerHTML = `Pro — all problems unlocked, unlimited AI explanations`;
+    badge.innerHTML = `Pro — full problem library, unlimited AI explanations`;
   } else {
     // The daily submission/explanation counters rarely bind in practice --
-    // the free-tier problem lock is the restriction that actually matters,
-    // so lead with that instead of burying it behind counters that look
-    // generous on their own ("0/20 submissions" reads like broad access).
-    const freeCount = allProblems.filter(p => p.is_free).length;
-    const totalCount = allProblems.length;
-    const problemsText = totalCount > 0 ? `${freeCount}/${totalCount} problems unlocked` : "";
-    badge.innerHTML = `Free — ${problemsText}, ${usage.explanations_today}/${usage.free_daily_explanations} AI explanations today <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
+    // the free-tier problem lock is the restriction that actually
+    // matters, so lead with that instead of burying it behind counters
+    // that look generous on their own ("0/20 submissions" reads like
+    // broad access). Deliberately no exact counts here (bank size and
+    // free-tier fraction aren't things we want to publish in the UI).
+    badge.innerHTML = `Free — limited problem access <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
   }
   const btn = document.getElementById("upgradeBtn");
   if (btn) btn.onclick = doUpgrade;
@@ -486,10 +485,14 @@ async function refreshIdentityDependentState() {
 }
 
 function updateSqlTrackMeta() {
+  // Deliberately no raw problem count here -- same reasoning as the tier
+  // badge (bank size isn't something we want to publish in the UI).
+  // Topic breadth is fine to show, it's a coverage signal, not a scarcity
+  // one.
   const el = document.getElementById("sqlTrackMeta");
   if (!el) return;
   const topicCount = new Set(allProblems.map(p => p.topic).filter(Boolean)).size;
-  el.textContent = `${allProblems.length} problems across ${topicCount} topics`;
+  el.textContent = `Real interview-style questions across ${topicCount} topics`;
 }
 
 async function init() {
