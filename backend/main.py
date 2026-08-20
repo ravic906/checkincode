@@ -403,6 +403,9 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             conversation=session["conversation"],
         )
     except Exception as e:
+        # Roll back the user turn we just recorded so a client retry after a
+        # transient failure doesn't leave a duplicate in the transcript.
+        session["conversation"].pop()
         raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
 
     interview.record_turn(session, "assistant", result["question"], result["topic"])
