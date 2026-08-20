@@ -102,7 +102,8 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
         },
         timeout=30,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"{resp.status_code} error from LLM provider: {resp.text[:500]}")
     data = resp.json()
 
     reply = data["choices"][0]["message"]["content"].strip()
