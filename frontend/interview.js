@@ -133,6 +133,8 @@ function renderInterviewSetup() {
   };
 
   document.getElementById("startInterviewBtn").onclick = async () => {
+    const startBtn = document.getElementById("startInterviewBtn");
+    if (startBtn.disabled) return; // guard against a double-click firing two overlapping interviews
     const mode = document.querySelector('input[name="interviewMode"]:checked').value;
     const skipIntro = document.getElementById("skipIntroCheck").checked;
     const durationMinutes = parseInt(document.getElementById("durationSlider").value, 10);
@@ -145,6 +147,7 @@ function renderInterviewSetup() {
       return;
     }
 
+    startBtn.disabled = true;
     try {
       const res = await api("/api/interview/start", {
         method: "POST",
@@ -152,6 +155,7 @@ function renderInterviewSetup() {
       });
       beginLiveInterview(res, mode, resumeText);
     } catch (err) {
+      startBtn.disabled = false;
       errorEl.textContent = err.status === 402
         ? `${err.message}`
         : `Couldn't start interview: ${err.message}`;
@@ -292,15 +296,41 @@ function startTimer() {
   }, 1000);
 }
 
+// Chrome has two well-known speechSynthesis bugs that both look like
+// "the question cuts off mid-sentence": (1) it garbage-collects the
+// SpeechSynthesisUtterance if nothing outside the speak() call holds a
+// reference to it, so we keep one at module scope; (2) it silently stops
+// speaking on its own after a few seconds unless nudged, worked around by
+// periodically pausing/resuming while an utterance is active.
+let currentUtterance = null;
+let speechKeepAliveTimer = null;
+
 function speak(text) {
   return new Promise((resolve) => {
     if (!speechSynthesisSupported) { resolve(); return; }
+
     window.speechSynthesis.cancel();
+    clearInterval(speechKeepAliveTimer);
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.0;
-    utterance.onend = resolve;
-    utterance.onerror = resolve;
+    currentUtterance = utterance; // keep alive -- see note above
+
+    const cleanup = () => {
+      clearInterval(speechKeepAliveTimer);
+      currentUtterance = null;
+      resolve();
+    };
+    utterance.onend = cleanup;
+    utterance.onerror = cleanup;
+
     window.speechSynthesis.speak(utterance);
+
+    speechKeepAliveTimer = setInterval(() => {
+      if (!window.speechSynthesis.speaking) { clearInterval(speechKeepAliveTimer); return; }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 5000);
   });
 }
 
@@ -485,6 +515,8 @@ function renderFeedback(report) {
 window.renderInterviewSetup = renderInterviewSetup;
 window.stopInterviewAudio = () => {
   window.speechSynthesis?.cancel();
+  clearInterval(speechKeepAliveTimer);
+  currentUtterance = null;
   if (recognition && isListening) recognition.stop();
   if (interviewState && interviewState.timerHandle) clearInterval(interviewState.timerHandle);
 };
