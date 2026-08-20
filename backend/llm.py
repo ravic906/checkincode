@@ -74,7 +74,7 @@ def _log_usage(entry: dict):
         f.write(json.dumps(entry) + "\n")
 
 
-def _call_chat(*, user_id: str, problem_id: str, messages: list[dict]) -> dict:
+def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 300) -> dict:
     """
     Shared low-level call: posts `messages` to the configured
     OpenAI-compatible chat completions endpoint, logs usage, and returns
@@ -98,7 +98,7 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict]) -> dict:
             "model": LLM_MODEL,
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 300,
+            "max_tokens": max_tokens,
         },
         timeout=30,
     )
@@ -189,3 +189,125 @@ def ask_followup(
 
     result = _call_chat(user_id=user_id, problem_id=problem["id"], messages=messages)
     return {"answer": result["reply"], "usage": result["usage"]}
+
+
+def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
+    resume_block = ""
+    if resume_text:
+        resume_block = (
+            "The candidate's resume/background (use it to ground your topic "
+            "choices and follow-ups in their actual experience, but still "
+            "cover core SQL fundamentals -- don't just ask about their resume "
+            "verbatim):\n"
+            f"{resume_text[:4000]}\n\n"
+        )
+    return (
+        "You are conducting a live, spoken SQL technical interview for a "
+        "candidate applying to a data/analytics role in India. Ask ONE "
+        "question at a time, in natural spoken language -- no markdown, no "
+        "bullet points, no code blocks, since your question will be read "
+        "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
+        f"{resume_block}"
+        f"Topics to cover across the interview: {', '.join(topics)}.\n\n"
+        "After the candidate's most recent answer, decide exactly one of:\n"
+        "- follow_up: there is a specific gap, vagueness, or mistake in "
+        "their answer -- ask a targeted follow-up on the SAME topic to "
+        "clarify or correct it.\n"
+        "- probe: their answer was solid and there is room to go deeper on "
+        "the SAME topic (edge cases, performance, trade-offs, real-world "
+        "scenarios).\n"
+        "- switch_topic: their answer was sufficient, or they are clearly "
+        "stuck after a follow-up/probe already -- move to a new topic from "
+        "the list above that has not been covered yet.\n\n"
+        "Only ask about SQL, databases, and data engineering concepts. If "
+        "the candidate goes off-topic, gently redirect back to the "
+        "interview.\n\n"
+        "Respond with ONLY a JSON object, no other text, no markdown code "
+        'fences: {"action": "follow_up"|"probe"|"switch_topic", "topic": '
+        '"<topic name>", "question": "<your next spoken question>"}'
+    )
+
+
+def _parse_json_reply(reply: str) -> dict:
+    """Models sometimes wrap JSON in ```json fences despite instructions not to -- strip those before parsing."""
+    text = reply.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
+
+
+def interview_turn(
+    *,
+    user_id: str,
+    topics: list[str],
+    resume_text: str | None,
+    conversation: list[dict],
+) -> dict:
+    """
+    Decides the next interview question. `conversation` is the full turn
+    history so far as [{"role": "assistant"|"user", "content": ...}, ...]
+    (may be empty for the very first question). Returns:
+        {"action": str, "topic": str, "question": str, "usage": {...}}
+    Falls back to a generic switch_topic question if the model's reply isn't
+    valid JSON, so a single malformed response doesn't break the interview.
+    """
+    messages = [{"role": "system", "content": _interview_system_prompt(topics, resume_text)}]
+    if conversation:
+        messages.extend(conversation)
+    else:
+        messages.append({"role": "user", "content": "Begin the interview with the first question."})
+
+    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=250)
+    try:
+        parsed = _parse_json_reply(result["reply"])
+        return {
+            "action": parsed.get("action", "switch_topic"),
+            "topic": parsed.get("topic", topics[0]),
+            "question": parsed["question"],
+            "usage": result["usage"],
+        }
+    except (json.JSONDecodeError, KeyError):
+        return {
+            "action": "switch_topic",
+            "topic": topics[0],
+            "question": result["reply"],
+            "usage": result["usage"],
+        }
+
+
+FEEDBACK_SYSTEM_PROMPT = (
+    "You are an experienced SQL interviewer writing a feedback report after "
+    "a mock interview. Review the full transcript and produce a structured, "
+    "honest but encouraging assessment for the candidate.\n\n"
+    "Respond with ONLY a JSON object, no other text, no markdown code "
+    'fences: {"overall_summary": "<2-3 sentence overall impression>", '
+    '"strengths": ["<point>", ...], "weaknesses": ["<point>", ...], '
+    '"topics_to_study": ["<topic>", ...], '
+    '"rough_level": "beginner"|"intermediate"|"advanced"}'
+)
+
+
+def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
+    """
+    Generates the end-of-interview feedback report from the full transcript.
+    Returns {"report": {...parsed fields...}, "usage": {...}}.
+    """
+    transcript = "\n".join(f"{t['role'].upper()}: {t['content']}" for t in conversation)
+    messages = [
+        {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
+    ]
+    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=600)
+    try:
+        report = _parse_json_reply(result["reply"])
+    except json.JSONDecodeError:
+        report = {
+            "overall_summary": result["reply"],
+            "strengths": [],
+            "weaknesses": [],
+            "topics_to_study": [],
+            "rough_level": "intermediate",
+        }
+    return {"report": report, "usage": result["usage"]}

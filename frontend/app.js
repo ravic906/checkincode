@@ -46,10 +46,21 @@ function setTutorEnabled(enabled) {
 function showHome() {
   document.getElementById("homeScreen").style.display = "flex";
   document.getElementById("practiceLayout").style.display = "none";
+  document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("tutorToggleWrap").style.display = "none";
+  if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
+  document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("tutorToggleWrap").style.display = "flex";
+}
+function showInterviewScreen() {
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("practiceLayout").style.display = "none";
+  document.getElementById("interviewScreen").style.display = "flex";
+  document.getElementById("tutorToggleWrap").style.display = "none";
 }
 
 async function refreshTierBadge() {
@@ -355,6 +366,10 @@ async function init() {
 
   document.getElementById("brandHome").onclick = showHome;
   document.getElementById("trackSql").onclick = showSqlTrack;
+  document.getElementById("trackInterview").onclick = () => {
+    showInterviewScreen();
+    if (window.renderInterviewSetup) window.renderInterviewSetup();
+  };
 
   showHome();
 }

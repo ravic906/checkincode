@@ -22,7 +22,7 @@ import datetime
 import uuid
 from collections import defaultdict
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -31,6 +31,8 @@ import duckdb
 from problems import PROBLEMS, get_problem, list_problems_summary
 import sandbox
 import llm
+import interview
+import resume_parser
 
 app = FastAPI(title="SQL Practice MVP")
 
@@ -87,6 +89,21 @@ class FollowupRequest(BaseModel):
     error: str | None = None
     conversation: list[dict]
     question: str
+
+
+class InterviewStartRequest(BaseModel):
+    mode: str  # "personalized" | "generic"
+    resume_text: str | None = None
+    skip_intro: bool = False
+
+
+class InterviewAnswerRequest(BaseModel):
+    session_id: str
+    answer_text: str
+
+
+class InterviewEndRequest(BaseModel):
+    session_id: str
 
 
 @app.get("/api/problems")
@@ -282,3 +299,137 @@ def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None)
         return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
     except Exception as e:
         raise HTTPException(502, f"AI tutor unavailable right now ({e}).")
+
+
+INTRO_QUESTION = (
+    "Let's get started. Could you briefly introduce yourself and walk me "
+    "through your experience working with SQL and databases?"
+)
+
+
+def _require_paid(u: dict):
+    if u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "Mock interviews are a Pro feature (₹199/mo) -- the interview "
+            "calls the AI continuously for up to 45 minutes, which costs a "
+            "lot more than the occasional wrong-answer explanation.",
+        )
+
+
+@app.post("/api/interview/parse-resume")
+async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None)):
+    user_id = x_user_id or str(uuid.uuid4())
+    u = _get_usage(user_id)
+    _require_paid(u)
+
+    file_bytes = await file.read()
+    try:
+        text = resume_parser.extract_text(file.filename, file_bytes)
+    except resume_parser.UnsupportedResumeFormat as e:
+        raise HTTPException(400, str(e))
+    return {"resume_text": text}
+
+
+@app.post("/api/interview/start")
+def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(default=None)):
+    user_id = x_user_id or str(uuid.uuid4())
+    u = _get_usage(user_id)
+    _require_paid(u)
+
+    if req.mode not in ("personalized", "generic"):
+        raise HTTPException(400, "mode must be 'personalized' or 'generic'")
+    if req.mode == "personalized" and not req.resume_text:
+        raise HTTPException(400, "resume_text is required for a personalized interview")
+
+    session = interview.create_session(
+        user_id=user_id,
+        mode=req.mode,
+        resume_text=req.resume_text,
+        skip_intro=req.skip_intro,
+    )
+
+    if req.skip_intro:
+        try:
+            result = llm.interview_turn(
+                user_id=user_id,
+                topics=interview.GENERIC_TOPICS,
+                resume_text=req.resume_text,
+                conversation=[],
+            )
+        except Exception as e:
+            raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
+        question, topic, action = result["question"], result["topic"], result["action"]
+    else:
+        question, topic, action = INTRO_QUESTION, "intro", "intro"
+
+    interview.record_turn(session, "assistant", question, topic)
+
+    return {
+        "session_id": session["session_id"],
+        "question": question,
+        "topic": topic,
+        "action": action,
+        "remaining_seconds": interview.remaining_seconds(session),
+    }
+
+
+@app.post("/api/interview/answer")
+def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(default=None)):
+    user_id = x_user_id or str(uuid.uuid4())
+    u = _get_usage(user_id)
+    _require_paid(u)
+
+    session = interview.get_session(req.session_id)
+    if not session or session["user_id"] != user_id:
+        raise HTTPException(404, "Interview session not found")
+    if session["ended"]:
+        raise HTTPException(400, "This interview has already ended")
+
+    interview.record_turn(session, "user", req.answer_text)
+
+    if interview.is_time_up(session):
+        return {
+            "time_up": True,
+            "session_id": session["session_id"],
+            "remaining_seconds": 0,
+        }
+
+    try:
+        result = llm.interview_turn(
+            user_id=user_id,
+            topics=interview.GENERIC_TOPICS,
+            resume_text=session["resume_text"],
+            conversation=session["conversation"],
+        )
+    except Exception as e:
+        raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
+
+    interview.record_turn(session, "assistant", result["question"], result["topic"])
+
+    return {
+        "time_up": False,
+        "session_id": session["session_id"],
+        "question": result["question"],
+        "topic": result["topic"],
+        "action": result["action"],
+        "remaining_seconds": interview.remaining_seconds(session),
+    }
+
+
+@app.post("/api/interview/end")
+def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=None)):
+    user_id = x_user_id or str(uuid.uuid4())
+    session = interview.get_session(req.session_id)
+    if not session or session["user_id"] != user_id:
+        raise HTTPException(404, "Interview session not found")
+
+    if session["feedback"] is None:
+        try:
+            result = llm.interview_feedback(user_id=user_id, conversation=session["conversation"])
+            session["feedback"] = result["report"]
+        except Exception as e:
+            raise HTTPException(502, f"Couldn't generate feedback report right now ({e}).")
+
+    session["ended"] = True
+    return {"feedback": session["feedback"], "conversation": session["conversation"]}

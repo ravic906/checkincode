@@ -65,7 +65,7 @@ origin.
 Terminal 1 — backend:
 ```bash
 cd backend
-pip3 install -r requirements.txt
+pip3 install --prefer-binary -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 

@@ -27,6 +27,11 @@
         <div class="track-title">SQL</div>
         <div class="track-desc">Joins, aggregation, subqueries, window functions — graded by DuckDB.</div>
       </button>
+      <button class="track-card" id="trackInterview">
+        <div class="track-icon">🎤</div>
+        <div class="track-title">Mock Interview <span class="pro-badge">PRO</span></div>
+        <div class="track-desc">45-min spoken SQL interview with an adaptive AI interviewer.</div>
+      </button>
       <button class="track-card disabled" id="trackPython" disabled>
         <div class="track-icon">🐍</div>
         <div class="track-title">Python</div>
@@ -34,6 +39,8 @@
       </button>
     </div>
   </section>
+
+  <section class="interview-screen" id="interviewScreen" style="display:none;"></section>
 
   <div class="layout" id="practiceLayout" style="display:none;">
     <aside class="sidebar" id="sidebar">
@@ -62,5 +69,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.js"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
+  <script src="interview.js"></script>
 </body>
 </html>
