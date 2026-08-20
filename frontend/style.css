@@ -490,8 +490,15 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .interim-text { min-height: 18px; color: var(--muted); font-size: 13px; font-style: italic; }
 
-#typedAnswer {
+.typed-answer-row {
   width: 100%;
+  max-width: 480px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+#typedAnswer {
+  flex: 1;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -499,7 +506,10 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   padding: 10px;
   font-size: 13px;
   font-family: inherit;
+  resize: vertical;
 }
+.typed-answer-row .submit-btn { flex-shrink: 0; }
+.typed-answer-row .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .feedback-report {
   max-width: 720px;

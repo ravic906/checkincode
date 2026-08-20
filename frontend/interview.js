@@ -150,12 +150,13 @@ function renderLiveInterview() {
       <div class="interview-transcript" id="interviewTranscript"></div>
       <div class="interview-controls">
         ${speechRecognitionSupported ? `
-          <button class="mic-btn" id="micBtn">🎤 Hold to Answer</button>
+          <button class="mic-btn" id="micBtn">🎤 Unmute to Speak</button>
           <div class="interim-text" id="interimText"></div>
-        ` : `
-          <textarea id="typedAnswer" placeholder="Type your answer…" rows="3"></textarea>
-          <button class="submit-btn" id="submitTypedBtn">Submit Answer</button>
-        `}
+        ` : ""}
+        <div class="typed-answer-row">
+          <textarea id="typedAnswer" placeholder="Or type your answer…" rows="2"></textarea>
+          <button class="submit-btn" id="submitTypedBtn">Submit</button>
+        </div>
       </div>
     </div>
   `;
@@ -164,17 +165,17 @@ function renderLiveInterview() {
   document.getElementById("endInterviewBtn").onclick = () => endInterview();
 
   if (speechRecognitionSupported) {
-    const micBtn = document.getElementById("micBtn");
-    micBtn.onmousedown = startListening;
-    micBtn.onmouseup = stopListening;
-    micBtn.ontouchstart = (e) => { e.preventDefault(); startListening(); };
-    micBtn.ontouchend = (e) => { e.preventDefault(); stopListening(); };
-  } else {
-    document.getElementById("submitTypedBtn").onclick = () => {
-      const text = document.getElementById("typedAnswer").value.trim();
-      if (text) submitAnswer(text);
-    };
+    document.getElementById("micBtn").onclick = toggleListening;
   }
+
+  document.getElementById("submitTypedBtn").onclick = () => {
+    const el = document.getElementById("typedAnswer");
+    const text = el.value.trim();
+    if (!text) return;
+    if (isListening) stopListening({ skipSubmit: true });
+    el.value = "";
+    submitAnswer(text);
+  };
 }
 
 function renderTranscript() {
@@ -215,6 +216,21 @@ function speak(text) {
   });
 }
 
+let pendingFinalTranscript = "";
+let skipNextSubmit = false;
+
+function toggleListening() {
+  if (isListening) stopListening();
+  else startListening();
+}
+
+function setMicUi(state) {
+  const micBtn = document.getElementById("micBtn");
+  if (!micBtn) return;
+  micBtn.classList.toggle("listening", state === "listening");
+  micBtn.textContent = state === "listening" ? "🔴 Listening… Tap to Mute" : "🎤 Unmute to Speak";
+}
+
 function startListening() {
   if (!speechRecognitionSupported || isListening) return;
   recognition = new SpeechRecognitionCtor();
@@ -222,41 +238,41 @@ function startListening() {
   recognition.interimResults = true;
   recognition.lang = "en-IN";
 
-  let finalTranscript = "";
+  pendingFinalTranscript = "";
+  skipNextSubmit = false;
   const interimEl = document.getElementById("interimText");
 
   recognition.onresult = (event) => {
     let interim = "";
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const chunk = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalTranscript += chunk + " ";
+      if (event.results[i].isFinal) pendingFinalTranscript += chunk + " ";
       else interim += chunk;
     }
-    if (interimEl) interimEl.textContent = finalTranscript + interim;
+    if (interimEl) interimEl.textContent = pendingFinalTranscript + interim;
   };
 
   recognition.onend = () => {
     isListening = false;
-    const micBtn = document.getElementById("micBtn");
-    if (micBtn) micBtn.classList.remove("listening");
-    const text = finalTranscript.trim();
+    setMicUi("muted");
+    const text = pendingFinalTranscript.trim();
     if (interimEl) interimEl.textContent = "";
-    if (text) submitAnswer(text);
+    if (text && !skipNextSubmit) submitAnswer(text);
+    skipNextSubmit = false;
   };
 
   recognition.onerror = () => {
     isListening = false;
-    const micBtn = document.getElementById("micBtn");
-    if (micBtn) micBtn.classList.remove("listening");
+    setMicUi("muted");
   };
 
   isListening = true;
-  const micBtn = document.getElementById("micBtn");
-  if (micBtn) micBtn.classList.add("listening");
+  setMicUi("listening");
   recognition.start();
 }
 
-function stopListening() {
+function stopListening(opts = {}) {
+  if (opts.skipSubmit) skipNextSubmit = true;
   if (recognition && isListening) recognition.stop();
 }
 
@@ -265,7 +281,9 @@ async function submitAnswer(answerText) {
   renderTranscript();
 
   const micBtn = document.getElementById("micBtn");
+  const submitTypedBtn = document.getElementById("submitTypedBtn");
   if (micBtn) micBtn.disabled = true;
+  if (submitTypedBtn) submitTypedBtn.disabled = true;
 
   try {
     const res = await api("/api/interview/answer", {
@@ -287,6 +305,7 @@ async function submitAnswer(answerText) {
     renderTranscript();
   } finally {
     if (micBtn) micBtn.disabled = false;
+    if (submitTypedBtn) submitTypedBtn.disabled = false;
   }
 }
 
