@@ -94,11 +94,11 @@ async function refreshTierBadge() {
   if (usage.tier === "paid") {
     badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix`;
   } else {
-    // The daily submission/explanation counters rarely bind in practice --
-    // the free-tier problem lock is the restriction that actually
-    // matters, so lead with that instead of burying it behind counters
-    // that look generous on their own ("0/20 submissions" reads like
-    // broad access). Deliberately no exact counts here (bank size and
+    // The daily submission counter rarely binds in practice -- the
+    // free-tier problem lock is the restriction that actually matters,
+    // so lead with that instead of burying it behind a counter that
+    // looks generous on its own ("0/20 submissions" reads like broad
+    // access). Deliberately no exact counts here (bank size and
     // free-tier fraction aren't things we want to publish in the UI).
     badge.innerHTML = `Free — limited problem access <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
   }

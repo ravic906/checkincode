@@ -3,8 +3,9 @@
 "LeetCode for interviews" for Indian IT professionals — SQL today, with
 Python, DSA, and other tracks planned. Every SQL submission is graded by
 actually running the query in DuckDB — never by an LLM guessing whether
-it's right. The LLM is only called to *explain* a wrong answer, so correct
-answers cost ₹0 in inference.
+it's right. The LLM only gets called on demand, when a (Pro) student opens
+"Ask Phoenix" for contextual help on a problem, so grading itself costs ₹0
+in inference.
 
 ## Stack (and why)
 
@@ -78,11 +79,12 @@ python3 -m http.server 8080
 
 Then open http://127.0.0.1:8080 in a browser.
 
-## Configuring the AI tutor (LLM)
+## Configuring Ask Phoenix (LLM)
 
-All LLM logic is isolated in `backend/llm.py` — one function,
-`get_explanation()`, is the only place that talks to a model. Swap
-providers by changing env vars only:
+All LLM logic is isolated in `backend/llm.py` — `ask_phoenix()` is the only
+function that talks to a model (plus `interview_turn()`/`interview_feedback()`
+for mock interviews, and `generate_problem_batch()` for admin content
+generation). Swap providers by changing env vars only:
 
 ```bash
 # Example: Groq (OpenAI-compatible endpoint, fast + cheap Llama models)
@@ -96,10 +98,9 @@ export LLM_API_KEY="AIza..."
 export LLM_MODEL="gemini-1.5-flash"
 ```
 
-Without these set, wrong answers still work fully (pass/fail, expected vs.
-actual diff) — the app just shows "AI explanation unavailable right now"
-instead of a tutor message, so the core grading loop never breaks due to
-LLM config/outage.
+Grading itself never depends on the LLM — Ask Phoenix is a separate,
+on-demand, Pro-only feature. Without these env vars set, `/api/ask-phoenix`
+just returns a 502 with a clear error instead of an answer.
 
 Every LLM call appends one JSON line to `backend/usage_log.jsonl`:
 `user_id, problem_id, model, prompt_tokens, completion_tokens,
@@ -125,10 +126,10 @@ you actually configure — the numbers in there right now are placeholders.
    canonical query is run once at server startup, cached). Problems that
    don't require a specific row order are compared as sorted multisets, so
    students aren't failed for missing an `ORDER BY` they weren't asked for.
-4. If correct → return pass immediately. **No LLM call.**
-5. If wrong → check the student's free-tier explanation quota, then call
-   `llm.get_explanation()` with the problem, the student's query, and an
-   expected-vs-actual preview.
+4. Either way (pass or fail) → return the result immediately. **No LLM
+   call** -- grading is pure code. A Pro student can separately open "Ask
+   Phoenix" for contextual help on the problem (`llm.ask_phoenix()`), but
+   that's a distinct, on-demand action, not part of grading.
 
 This is enforced only at the process level (no OS sandbox/container), which
 is fine for a local MVP but **not** sufficient hardening for a public
@@ -137,16 +138,24 @@ execution inside a locked-down subprocess/container with no filesystem or
 network access, since the keyword blocklist alone won't stop every
 DuckDB extension/function surface (e.g. `read_csv`, `httpfs`).
 
-## Tiering (MVP-simple, not production auth)
+## Tiering and auth
 
 - Anonymous `X-User-Id` (a random UUID the frontend generates and stores in
-  `localStorage`) identifies a "user." There's no real login yet.
-- Free tier: 20 submissions/day, 3 AI explanations/day (see
-  `FREE_DAILY_SUBMISSIONS` / `FREE_DAILY_EXPLANATIONS` in `main.py`).
-- `POST /api/dev/upgrade` flips a user to `paid` (unlimited explanations) —
-  this is a stand-in for wherever a real payment webhook (e.g. Razorpay,
-  for a ₹199/mo INR price point) would call in production. Usage state is
-  in-memory and resets on server restart; swap for a real DB before launch.
+  `localStorage`) is the fallback identity for practice mode -- signing in
+  isn't required just to solve problems.
+- Signing in (Clerk, `frontend/auth.js` + `backend/auth.py`) verifies a
+  session JWT server-side and swaps in the real Clerk user id wherever a
+  request carries a valid `Authorization: Bearer` token. Tier + daily
+  counters persist in Postgres (`backend/users.py`), not in memory, so they
+  survive a Render restart.
+- Free tier: `FREE_DAILY_SUBMISSIONS` submissions/day (`main.py`), plus only
+  the curated free-tier subset of the problem bank
+  (`problems.FREE_PROBLEM_IDS`). No AI help.
+- Paid tier (₹199/mo, real Razorpay checkout -- `backend/payments.py`,
+  `POST /api/payments/create-order` + `POST /api/payments/verify`):
+  unlimited submissions, the full problem bank, mock interviews, and
+  unlimited **Ask Phoenix** (`POST /api/ask-phoenix`) -- open-ended
+  contextual help on any problem, any time, not gated by a daily count.
 
 ## Mock voice interview (backend/interview.py, frontend/interview.js)
 
@@ -171,10 +180,9 @@ change — the orchestration logic in `interview.py`/`llm.py` is unaffected
 since it already just deals in text.
 
 **Session state is persisted to Postgres** (`backend/db.py`,
-`interview_sessions` table) on every turn — so unlike the rest of the app's
-in-memory state (usage tracking, tier), an in-progress interview survives a
-browser crash/reload, a transient LLM failure, or the backend itself
-restarting. `GET /api/interview/session/{id}` lets the frontend reconnect
+`interview_sessions` table) on every turn, so an in-progress interview
+survives a browser crash/reload, a transient LLM failure, or the backend
+itself restarting. `GET /api/interview/session/{id}` lets the frontend reconnect
 to an existing session and rehydrate the full transcript, current question,
 table context, and remaining time; the frontend tracks the active
 `session_id` in `localStorage` and offers a "Resume interview?" prompt
@@ -202,18 +210,24 @@ Seed data intentionally includes NULLs, a rehire duplicate, and a
 duplicate department row, so problems feel like real messy analyst data
 rather than toy examples.
 
-Add a new problem by appending a dict to `PROBLEMS` in `problems.py` — no
-other file needs to change; the API, grading, and frontend all read from
-that list dynamically.
+Problems live in Postgres, not in code — `PROBLEMS` in `problems.py` only
+seeds an empty table on first deploy; editing it after that has no effect.
+Add new problems either by hand (a direct SQL insert into the `problems`
+table, `status='live'`) or via the admin batch-generation flow
+(`POST /api/admin/problems/generate-batch`, human-reviewed via `/approve`
+before going live — see `insert_pending_draft()` in `problems.py`).
 
 ## What's not in this MVP (known gaps)
 
-- No real authentication/accounts — just an anonymous device UUID.
-- No real payment integration — `/api/dev/upgrade` is a stub.
-- No persistent database — problems are in-process Python, usage counters
-  are in-memory (both reset on restart).
-- No production sandboxing (see grading section above) — fine for local
-  dev, not for a public deploy.
-- No submission history / progress tracking per user.
+- No production sandboxing for DuckDB grading (see grading section above)
+  — process-level isolation only, fine for the current scale, not
+  sufficient hardening for a large-scale public deploy.
+- Anonymous progress (made before signing in) only merges into a real
+  account automatically the first time that browser signs in
+  (`POST /api/merge-progress`) -- there's no manual merge path if that
+  auto-merge is ever missed.
 - Interview STT/TTS quality is whatever the browser's Web Speech API gives
-  you — no fallback to a paid provider yet (see mock-interview section above).
+  you — no fallback to a paid provider yet (see mock-interview section
+  above).
+- Problem bank is at 65 problems, short of the ~150 target discussed for
+  full topic/difficulty coverage.

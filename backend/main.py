@@ -343,7 +343,7 @@ def _require_paid(u: dict):
             402,
             "Mock interviews are a Pro feature (₹199/mo) -- the interview "
             "calls the AI continuously for up to 45 minutes, which costs a "
-            "lot more than the occasional wrong-answer explanation.",
+            "lot more than an occasional Ask Phoenix question.",
         )
 
 
