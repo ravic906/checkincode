@@ -98,11 +98,15 @@ function renderProblemList() {
   const diff = document.getElementById("difficultyFilter").value;
   const tag = document.getElementById("tagFilter").value;
   const topic = document.getElementById("topicFilter").value;
+  const access = document.getElementById("accessFilter").value;
   const list = document.getElementById("problemList");
   list.innerHTML = "";
 
   const filtered = allProblems.filter(p =>
-    (!diff || p.difficulty === diff) && (!tag || p.tags.includes(tag)) && (!topic || p.topic === topic)
+    (!diff || p.difficulty === diff)
+    && (!tag || p.tags.includes(tag))
+    && (!topic || p.topic === topic)
+    && (!access || (access === "free" ? p.is_free : !p.is_free))
   );
 
   for (const p of filtered) {
@@ -412,6 +416,7 @@ async function init() {
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("tagFilter").onchange = renderProblemList;
   document.getElementById("topicFilter").onchange = renderProblemList;
+  document.getElementById("accessFilter").onchange = renderProblemList;
 
   const tutorToggle = document.getElementById("tutorToggle");
   tutorToggle.checked = getTutorEnabled();

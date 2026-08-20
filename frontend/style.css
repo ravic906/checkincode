@@ -113,12 +113,14 @@ body {
 
 .filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--border);
 }
 .filters select {
-  flex: 1;
+  flex: 1 1 calc(50% - 4px);
+  min-width: 100px;
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
