@@ -17,6 +17,7 @@ import time
 import uuid
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
+MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
 
 GENERIC_TOPICS = [
     "SELECT / WHERE filtering basics",
@@ -34,7 +35,8 @@ GENERIC_TOPICS = [
 _SESSIONS: dict[str, dict] = {}
 
 
-def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool) -> dict:
+def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS) -> dict:
+    duration_seconds = max(MIN_INTERVIEW_DURATION_SECONDS, min(INTERVIEW_DURATION_SECONDS, duration_seconds))
     session_id = str(uuid.uuid4())
     session = {
         "session_id": session_id,
@@ -42,6 +44,7 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
         "mode": mode,  # "personalized" | "generic"
         "resume_text": resume_text,
         "skip_intro": skip_intro,
+        "duration_seconds": duration_seconds,
         "started_at": time.time(),
         "topics_covered": [],  # list of {"topic": str, "depth": int}
         "conversation": [],  # [{"role": "assistant"|"user", "content": str, "topic": str|None}]
@@ -61,7 +64,7 @@ def elapsed_seconds(session: dict) -> float:
 
 
 def remaining_seconds(session: dict) -> float:
-    return max(0, INTERVIEW_DURATION_SECONDS - elapsed_seconds(session))
+    return max(0, session["duration_seconds"] - elapsed_seconds(session))
 
 
 def is_time_up(session: dict) -> bool:

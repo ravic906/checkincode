@@ -42,7 +42,7 @@ function renderInterviewSetup() {
     <div class="interview-setup">
       <div class="interview-eyebrow">Pro · Voice Interview</div>
       <h1>Mock SQL Interview</h1>
-      <p class="home-sub">45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered.</p>
+      <p class="home-sub">20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered.</p>
 
       ${!speechRecognitionSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
 
@@ -69,6 +69,14 @@ function renderInterviewSetup() {
             <span id="fileDropText">Choose a résumé (PDF or DOCX)</span>
           </label>
           <div id="resumeStatus" class="resume-status"></div>
+        </div>
+
+        <div class="setup-row">
+          <div class="duration-row-label">
+            <span class="setup-section-label">Duration</span>
+            <span class="duration-value" id="durationValue">45 min</span>
+          </div>
+          <input type="range" id="durationSlider" class="duration-slider" min="20" max="45" step="5" value="45" />
         </div>
 
         <label class="toggle-row">
@@ -98,6 +106,10 @@ function renderInterviewSetup() {
     });
   });
 
+  document.getElementById("durationSlider").oninput = (e) => {
+    document.getElementById("durationValue").textContent = `${e.target.value} min`;
+  };
+
   document.getElementById("resumeFile").onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -123,6 +135,7 @@ function renderInterviewSetup() {
   document.getElementById("startInterviewBtn").onclick = async () => {
     const mode = document.querySelector('input[name="interviewMode"]:checked').value;
     const skipIntro = document.getElementById("skipIntroCheck").checked;
+    const durationMinutes = parseInt(document.getElementById("durationSlider").value, 10);
     const errorEl = document.getElementById("setupError");
     errorEl.style.display = "none";
 
@@ -135,7 +148,7 @@ function renderInterviewSetup() {
     try {
       const res = await api("/api/interview/start", {
         method: "POST",
-        body: JSON.stringify({ mode, resume_text: resumeText, skip_intro: skipIntro }),
+        body: JSON.stringify({ mode, resume_text: resumeText, skip_intro: skipIntro, duration_minutes: durationMinutes }),
       });
       beginLiveInterview(res, mode, resumeText);
     } catch (err) {
@@ -160,6 +173,7 @@ function beginLiveInterview(startRes, mode, resumeText) {
     mode,
     resumeText,
     remainingSeconds: startRes.remaining_seconds,
+    durationSeconds: startRes.duration_seconds || 45 * 60,
     timerHandle: null,
     transcript: [{ role: "assistant", content: startRes.question, topic: startRes.topic }],
     tableContext: startRes.table_context || null,
@@ -183,7 +197,6 @@ function renderTableContext() {
 }
 
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * 28;
-const TOTAL_INTERVIEW_SECONDS = 45 * 60;
 
 function renderLiveInterview() {
   const screen = document.getElementById("interviewScreen");
@@ -259,7 +272,8 @@ function updateTimerRing(remainingSeconds) {
   const label = document.getElementById("interviewTimer");
   if (label) label.textContent = formatTime(remainingSeconds);
   if (!progress) return;
-  const fraction = Math.max(0, Math.min(1, remainingSeconds / TOTAL_INTERVIEW_SECONDS));
+  const total = (interviewState && interviewState.durationSeconds) || 45 * 60;
+  const fraction = Math.max(0, Math.min(1, remainingSeconds / total));
   progress.style.strokeDashoffset = String(TIMER_RING_CIRCUMFERENCE * (1 - fraction));
   const wrap = document.getElementById("timerRingWrap");
   if (wrap) wrap.classList.toggle("timer-low", remainingSeconds <= 300);

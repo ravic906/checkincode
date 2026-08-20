@@ -95,6 +95,7 @@ class InterviewStartRequest(BaseModel):
     mode: str  # "personalized" | "generic"
     resume_text: str | None = None
     skip_intro: bool = False
+    duration_minutes: int = 45
 
 
 class InterviewAnswerRequest(BaseModel):
@@ -347,6 +348,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         mode=req.mode,
         resume_text=req.resume_text,
         skip_intro=req.skip_intro,
+        duration_seconds=req.duration_minutes * 60,
     )
 
     if req.skip_intro:
@@ -372,6 +374,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         "action": action,
         "table_context": table_context,
         "remaining_seconds": interview.remaining_seconds(session),
+        "duration_seconds": session["duration_seconds"],
     }
 
 
