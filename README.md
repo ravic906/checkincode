@@ -147,6 +147,40 @@ DuckDB extension/function surface (e.g. `read_csv`, `httpfs`).
   for a ₹199/mo INR price point) would call in production. Usage state is
   in-memory and resets on server restart; swap for a real DB before launch.
 
+## Mock voice interview (backend/interview.py, frontend/interview.js)
+
+A 45-minute spoken SQL interview, Pro-tier only. Generic mode covers a fixed
+topic list (`GENERIC_TOPICS` in `interview.py`); personalized mode takes an
+uploaded PDF/DOCX resume (`backend/resume_parser.py`) and grounds questions
+in it. After each answer the LLM decides one of `follow_up` (gap in the
+answer), `probe` (go deeper, same topic), or `switch_topic` — per
+`_interview_system_prompt()` in `llm.py`. At the end (time up or manually
+ended) `interview_feedback()` generates a structured report: overall
+summary, strengths, weaknesses, topics to study, rough level.
+
+**Voice is entirely client-side**: speech-to-text and text-to-speech both
+run via the browser's Web Speech API (`SpeechRecognition` /
+`speechSynthesis`) — no audio ever reaches the backend, which only ever
+sees transcribed text in and spoken question text out. That's free but
+robotic-sounding and Chrome-only for STT (Firefox has no
+`SpeechRecognition`; the UI falls back to a typed-answer textbox when
+unsupported). To upgrade later to Groq Whisper for STT, only the
+`startListening()`/`stopListening()` functions in `interview.js` need to
+change — the orchestration logic in `interview.py`/`llm.py` is unaffected
+since it already just deals in text.
+
+**Session state is in-memory** (`interview._SESSIONS`), same tradeoff as
+usage tracking — an interview in progress does **not** survive a backend
+restart or Render's free-tier spin-down after 15 min idle. Mid-conversation,
+that's rare (an active interview keeps the service warm), but starting one
+right after a long idle gap can 404 with "Interview session not found" if
+the service was mid-cold-start. Worth a real store (Redis/Postgres) before
+this survives production traffic patterns.
+
+**Cost note**: unlike the practice platform (LLM only called on wrong
+answers), a full interview makes many LLM calls over 45 minutes — hence
+paid-tier-only gating (`_require_paid()` in `main.py`, 402 for free users).
+
 ## Problem bank
 
 10 problems in `backend/problems.py`, each fully self-contained (own
@@ -171,3 +205,5 @@ that list dynamically.
 - No production sandboxing (see grading section above) — fine for local
   dev, not for a public deploy.
 - No submission history / progress tracking per user.
+- Interview STT/TTS quality is whatever the browser's Web Speech API gives
+  you — no fallback to a paid provider yet (see mock-interview section above).
