@@ -135,13 +135,22 @@ def init_schema():
                     submissions_today INTEGER NOT NULL DEFAULT 0,
                     explanations_today INTEGER NOT NULL DEFAULT 0,
                     interview_trial_used BOOLEAN NOT NULL DEFAULT FALSE,
+                    interview_month TEXT,
+                    interviews_this_month INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
             # Migration: `users` already existed in prod before
-            # interview_trial_used was added.
+            # interview_trial_used / interview_month / interviews_this_month
+            # were added.
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS interview_trial_used BOOLEAN NOT NULL DEFAULT FALSE
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS interview_month TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS interviews_this_month INTEGER NOT NULL DEFAULT 0
             """)
 
 

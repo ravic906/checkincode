@@ -678,6 +678,7 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   color: transparent;
   margin-bottom: 10px;
 }
+.setup-quota-note { font-size: 12px; color: var(--muted); margin: -4px 0 16px 0; }
 
 /* ---- Setup screen ---- */
 .interview-setup {

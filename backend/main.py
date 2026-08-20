@@ -179,6 +179,8 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "submissions_today": u["submissions"],
         "free_daily_submissions": FREE_DAILY_SUBMISSIONS,
         "interview_trial_used": u["interview_trial_used"],
+        "interviews_this_month": u["interviews_this_month"],
+        "max_interviews_per_month": MAX_INTERVIEWS_PER_MONTH,
     }
 
 
@@ -349,13 +351,18 @@ INTRO_QUESTION = (
 
 
 FREE_TRIAL_DURATION_SECONDS = 10 * 60
+MAX_INTERVIEWS_PER_MONTH = 10  # Pro-tier cap -- interviews now also cost real STT + LLM-turn spend, not just the occasional Ask Phoenix call
 
 
 def _require_paid_or_trial(u: dict) -> bool:
     """Returns True if this request is consuming the user's free interview
     trial (caller must then mark it used and cap the session's duration);
     False if they're paid (no trial needed); raises 402 if neither paid nor
-    trial-eligible."""
+    trial-eligible. Does NOT enforce the paid-tier monthly interview cap --
+    that's a starting-a-new-session concern only, checked separately in
+    api_interview_start so it can't retroactively block /answer or
+    /parse-resume calls against a session that was already validly started
+    under the cap (the count only changes once, at /start, not per turn)."""
     if u["tier"] == "paid":
         return False
     if not u["interview_trial_used"]:
@@ -363,7 +370,7 @@ def _require_paid_or_trial(u: dict) -> bool:
     raise HTTPException(
         402,
         "You've used your free interview trial. Upgrade to Pro (₹199/mo) "
-        "for unlimited mock interviews.",
+        f"for up to {MAX_INTERVIEWS_PER_MONTH} mock interviews a month.",
     )
 
 
@@ -391,6 +398,12 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
     is_trial = _require_paid_or_trial(u)
+    if not is_trial and u["interviews_this_month"] >= MAX_INTERVIEWS_PER_MONTH:
+        raise HTTPException(
+            402,
+            f"You've used all {MAX_INTERVIEWS_PER_MONTH} mock interviews included this month. "
+            "They reset at the start of next month.",
+        )
 
     if req.mode not in ("personalized", "generic"):
         raise HTTPException(400, "mode must be 'personalized' or 'generic'")
@@ -413,6 +426,8 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         # otherwise an abandoned-and-restarted interview would let a free
         # user get multiple trials for the cost of one.
         users_module.mark_interview_trial_used(user_id)
+    else:
+        users_module.increment_interview_count(user_id)
 
     if req.skip_intro:
         try:

@@ -129,8 +129,28 @@ async function renderInterviewSetupScreen() {
     // normal Pro copy and the real gate still applies server-side on submit.
   }
   const isTrialEligible = usage && usage.tier !== "paid" && !usage.interview_trial_used;
+  const isPaidAtCap = usage && usage.tier === "paid" && usage.interviews_this_month >= usage.max_interviews_per_month;
+  const remainingThisMonth = usage && usage.tier === "paid" ? usage.max_interviews_per_month - usage.interviews_this_month : null;
 
   const screen = document.getElementById("interviewScreen");
+
+  if (isPaidAtCap) {
+    screen.innerHTML = `
+      <div class="interview-setup">
+        <div class="interview-eyebrow">Pro · Voice Interview</div>
+        <h1>Mock SQL Interview</h1>
+        <div class="upsell-box">
+          You've used all ${usage.max_interviews_per_month} mock interviews included this month. They reset at the start of next month.
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const monthlyNote = usage && usage.tier === "paid"
+    ? `<p class="setup-quota-note">${remainingThisMonth} of ${usage.max_interviews_per_month} interviews left this month</p>`
+    : "";
+
   screen.innerHTML = `
     <div class="interview-setup">
       <div class="interview-eyebrow">${isTrialEligible ? "Free Trial · 10 min" : "Pro · Voice Interview"}</div>
@@ -138,6 +158,7 @@ async function renderInterviewSetupScreen() {
       <p class="home-sub">${isTrialEligible
         ? "Try one free 10-minute mock interview. Upgrade to Pro for the full 20-45 minute experience."
         : "20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
+      ${monthlyNote}
 
       ${!speechRecognitionSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
 
