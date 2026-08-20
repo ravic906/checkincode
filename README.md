@@ -1,9 +1,10 @@
-# SQL Practice MVP
+# Phoenix Prep
 
-"LeetCode for SQL" for Indian IT professionals prepping for interviews.
-Every submission is graded by actually running the query in DuckDB — never
-by an LLM guessing whether it's right. The LLM is only called to *explain*
-a wrong answer, so correct answers cost ₹0 in inference.
+"LeetCode for interviews" for Indian IT professionals — SQL today, with
+Python, DSA, and other tracks planned. Every SQL submission is graded by
+actually running the query in DuckDB — never by an LLM guessing whether
+it's right. The LLM is only called to *explain* a wrong answer, so correct
+answers cost ₹0 in inference.
 
 ## Stack (and why)
 
