@@ -78,14 +78,31 @@ function currentUserEmail() {
   return window.Clerk.user.primaryEmailAddress?.emailAddress || null;
 }
 
+// Clerk fires its listener on lots of internal state changes (token
+// refresh, focus, etc.), not just sign-in/out. mountUserButton() renders a
+// React tree into #authSection -- wiping it with innerHTML="" and
+// remounting on every single listener tick (as this used to do) bypasses
+// React's own unmount lifecycle, corrupting its internal tree over
+// repeated calls until it crashes ("Failed to execute 'removeChild' --
+// the node to be removed is not a child of this node") and leaves the
+// section empty. Track whether we're currently mounted and only
+// mount/unmount on an actual sign-in/out transition.
+let _authButtonMounted = false;
+
 function renderAuthSection() {
   const el = document.getElementById("authSection");
   if (!el || !window.Clerk) return;
 
   if (window.Clerk.user) {
+    if (_authButtonMounted) return;
     el.innerHTML = "";
     window.Clerk.mountUserButton(el);
+    _authButtonMounted = true;
   } else {
+    if (_authButtonMounted) {
+      window.Clerk.unmountUserButton(el);
+      _authButtonMounted = false;
+    }
     el.innerHTML = `<button class="signin-btn" id="signInBtn">Sign In</button>`;
     document.getElementById("signInBtn").onclick = () => window.Clerk.openSignIn({});
   }
