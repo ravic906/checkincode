@@ -352,8 +352,26 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   padding: 40px;
   text-align: center;
 }
-.home-screen h1 { font-size: 28px; margin: 0 0 8px 0; }
-.home-sub { color: var(--muted); margin: 0 0 36px 0; max-width: 480px; }
+.home-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(79, 140, 255, 0.1);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  border-radius: 999px;
+  padding: 5px 14px;
+  margin-bottom: 16px;
+}
+.home-screen h1 {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px 0;
+}
+.home-sub { color: var(--muted); font-size: 15px; margin: 0 0 40px 0; max-width: 480px; }
 
 .track-grid {
   display: flex;
@@ -363,22 +381,50 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 }
 
 .track-card {
-  width: 220px;
+  width: 260px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px 20px;
+  border-radius: 16px;
+  padding: 28px 24px 22px;
   cursor: pointer;
   color: var(--text);
   text-align: left;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
   font-family: inherit;
+  display: flex;
+  flex-direction: column;
 }
-.track-card:hover:not(.disabled) { border-color: var(--accent); transform: translateY(-2px); }
+.track-card:hover:not(.disabled) {
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px -12px rgba(79, 140, 255, 0.35);
+}
+.track-card-gold:hover:not(.disabled) {
+  border-color: var(--gold);
+  box-shadow: 0 12px 28px -12px var(--gold-glow);
+}
 .track-card.disabled { opacity: 0.5; cursor: not-allowed; }
-.track-icon { font-size: 32px; margin-bottom: 12px; }
+.track-icon {
+  font-size: 26px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
 .track-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
-.track-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.track-desc { font-size: 12px; color: var(--muted); line-height: 1.5; flex: 1; }
+.track-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
 
 /* Responsive: tablet and below -- sidebar stacks above the workspace
    instead of sitting beside it, so there's no fixed-width column fighting
@@ -409,7 +455,9 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   .track-grid { flex-direction: column; align-items: center; }
   .track-card { width: 100%; max-width: 320px; }
   .home-screen { padding: 24px 16px; }
-  .home-screen h1 { font-size: 22px; }
+  .home-eyebrow { font-size: 10px; padding: 4px 12px; }
+  .home-screen h1 { font-size: 24px; }
+  .home-sub { font-size: 13px; margin-bottom: 28px; }
 }
 
 /* Responsive: phones -- tighten further and let the toolbar wrap instead

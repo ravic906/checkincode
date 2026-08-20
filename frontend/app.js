@@ -474,7 +474,15 @@ async function refreshIdentityDependentState() {
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
   renderProblemList();
+  updateSqlTrackMeta();
   await refreshTierBadge();
+}
+
+function updateSqlTrackMeta() {
+  const el = document.getElementById("sqlTrackMeta");
+  if (!el) return;
+  const topicCount = new Set(allProblems.map(p => p.topic).filter(Boolean)).size;
+  el.textContent = `${allProblems.length} problems across ${topicCount} topics`;
 }
 
 async function init() {
@@ -482,6 +490,7 @@ async function init() {
   allProblems = problemsRes.problems;
   populateTagFilter();
   renderProblemList();
+  updateSqlTrackMeta();
 
   // The very first api() calls above race Clerk's async script load --
   // isSignedIn() is almost always still false at that instant even for a
