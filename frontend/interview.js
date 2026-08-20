@@ -221,7 +221,7 @@ function renderLiveInterview() {
           <div class="interim-text" id="interimText"></div>
         ` : ""}
         <div class="typed-answer-row">
-          <textarea id="typedAnswer" placeholder="Or type your answer…" rows="2"></textarea>
+          <textarea id="typedAnswer" placeholder="Or type your answer…" rows="4"></textarea>
           <button class="submit-btn" id="submitTypedBtn">Submit</button>
         </div>
       </div>
