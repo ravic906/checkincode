@@ -124,7 +124,7 @@ async function doUpgrade() {
               razorpay_signature: response.razorpay_signature,
             }),
           });
-          await refreshTierBadge();
+          await refreshIdentityDependentState();
         } catch (e) {
           alert(`Payment went through but we couldn't verify it (${e.message}). Contact support with payment id ${response.razorpay_payment_id}.`);
         }
@@ -448,11 +448,40 @@ async function sendFollowup() {
   }
 }
 
+async function refreshIdentityDependentState() {
+  // Re-pulls anything keyed off "who is this" -- tier, locked/solved status
+  // -- since the answer can change out from under the initial page load
+  // (Clerk finishes loading after our first render) or at runtime (sign
+  // in/out, an upgrade completing).
+  const problemsRes = await api("/api/problems");
+  allProblems = problemsRes.problems;
+  renderProblemList();
+  await refreshTierBadge();
+}
+
 async function init() {
   const [problemsRes] = await Promise.all([api("/api/problems"), refreshTierBadge()]);
   allProblems = problemsRes.problems;
   populateTagFilter();
   renderProblemList();
+
+  // The very first api() calls above race Clerk's async script load --
+  // isSignedIn() is almost always still false at that instant even for a
+  // signed-in user, so that first render silently uses the anonymous
+  // identity instead. Once Clerk actually finishes loading (and on every
+  // subsequent sign-in/out), refresh so tier/locked/solved reflect who's
+  // really signed in.
+  if (typeof waitForClerk === "function") {
+    waitForClerk()
+      .then((Clerk) => {
+        refreshIdentityDependentState();
+        Clerk.addListener(() => refreshIdentityDependentState());
+      })
+      .catch(() => {
+        // Clerk failed to load -- practice mode still works anonymously,
+        // nothing further to do here.
+      });
+  }
 
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("tagFilter").onchange = renderProblemList;
