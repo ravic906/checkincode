@@ -8,11 +8,18 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand" id="brandHome">Phoenix<span> Prep</span></div>
+    <div class="brand" id="brandHome">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2.4c1.6 2.1 2.2 4 1.7 5.9 1.6-.2 2.6-1.2 3-2.9 1.3 2.5 1 4.7-.9 6.6 1.9-.2 3.6-1 5.2-2.6-.2 3.6-2.6 6-7.1 7.1.9.6 2 .9 3.3 1-1.8 1.4-3.8 1.9-6.1 1.4A8.8 8.8 0 0 1 12 22a8.8 8.8 0 0 1-1.1-3.1c-2.3.5-4.3 0-6.1-1.4 1.3-.1 2.4-.4 3.3-1-4.5-1.1-6.9-3.5-7.1-7.1 1.6 1.6 3.3 2.4 5.2 2.6-1.9-1.9-2.2-4.1-.9-6.6.4 1.7 1.4 2.7 3 2.9-.5-1.9.1-3.8 1.7-5.9Z"/>
+        </svg>
+      </span>
+      Phoenix<span class="brand-accent"> Prep</span>
+    </div>
     <div class="topbar-right">
       <label class="tutor-toggle" id="tutorToggleWrap">
         <input type="checkbox" id="tutorToggle" checked />
-        <span>Tutor</span>
+        <span>Explain</span>
       </label>
       <div class="tier-badge" id="tierBadge">loading…</div>
       <button class="reset-progress-btn" id="resetProgressBtn" title="Reset solved-problem progress">Reset Progress</button>
@@ -26,13 +33,26 @@
     <p class="home-sub">Pick a track. Every answer is verified by actually running it — no guessing whether you're right.</p>
     <div class="track-grid">
       <button class="track-card" id="trackSql">
-        <div class="track-icon">🗄️</div>
+        <div class="track-icon track-icon-accent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="8" ry="3"/>
+            <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>
+            <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>
+          </svg>
+        </div>
         <div class="track-title">SQL</div>
         <div class="track-desc">Joins, aggregation, subqueries, window functions — graded by DuckDB.</div>
         <div class="track-meta">Real interview-style questions, easy to hard</div>
       </button>
       <button class="track-card track-card-gold" id="trackInterview">
-        <div class="track-icon">🎤</div>
+        <div class="track-icon track-icon-gold">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="12" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+            <line x1="8" y1="22" x2="16" y2="22"/>
+          </svg>
+        </div>
         <div class="track-title">Mock Interview <span class="pro-badge">PRO</span> <span class="pro-badge beta-badge">BETA</span></div>
         <div class="track-desc">45-min spoken SQL interview with an adaptive virtual interviewer.</div>
         <div class="track-meta">Personalized from your resume, or a generic round</div>

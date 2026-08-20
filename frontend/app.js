@@ -369,7 +369,7 @@ function renderResult(result, isSubmit, studentQuery) {
     if (!tutorOn) {
       // Tutor toggled off client-side -- backend already skipped the LLM call.
     } else if (result.explanation) {
-      html += `<div class="explanation-box"><div class="label">Tutor</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
+      html += `<div class="explanation-box"><div class="label">Explain</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
       html += `<div id="followupThread" class="followup-thread"></div>
         <div class="followup-input-row">
           <input type="text" id="followupInput" placeholder="Ask a follow-up question about this problem…" />
@@ -383,10 +383,10 @@ function renderResult(result, isSubmit, studentQuery) {
         conversation: [{ role: "assistant", content: result.explanation }],
       };
     } else if (result.explanation_error) {
-      html += `<div class="explanation-box"><div class="label">Tutor</div>${escapeHtml(result.explanation_error)}</div>`;
+      html += `<div class="explanation-box"><div class="label">Explain</div>${escapeHtml(result.explanation_error)}</div>`;
     } else if (!result.explanation_available) {
       html += `<div class="upsell-box">
-        You've used today's free tutor messages. Upgrade to Pro (₹199/mo) for unlimited help.
+        You've used today's free explanations. Upgrade to Pro (₹199/mo) for unlimited help.
         <br/><button id="inlineUpgradeBtn">Upgrade now</button>
       </div>`;
     }
@@ -411,7 +411,7 @@ function renderFollowupThread() {
   const turns = followupState.conversation.slice(1);
   thread.innerHTML = turns.map(t => `
     <div class="followup-turn ${t.role}">
-      <div class="who">${t.role === "user" ? "You" : "Tutor"}</div>
+      <div class="who">${t.role === "user" ? "You" : "Explain"}</div>
       ${escapeHtml(t.content)}
     </div>
   `).join("");
