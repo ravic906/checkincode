@@ -147,6 +147,28 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
     }
 
 
+def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 0.6, **kwargs) -> dict:
+    """
+    Wraps _call_chat with a few retries for json_mode calls specifically --
+    observed in practice to occasionally fail with a 400 from Groq's own
+    structured-output validator (empty generation, a misfired tool call,
+    truncation) even when the request itself is well-formed. These read as
+    transient generation hiccups rather than a real prompt problem (retrying
+    the identical request has succeeded every time so far), so retry a
+    couple of times before letting the error surface to the user.
+    """
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return _call_chat(**kwargs)
+        except RuntimeError as e:
+            last_error = e
+            if not kwargs.get("json_mode") or attempt == max_retries:
+                raise
+            time.sleep(retry_delay_seconds)
+    raise last_error
+
+
 def get_explanation(
     *,
     user_id: str,
@@ -343,7 +365,7 @@ def interview_turn(
     else:
         messages.append({"role": "user", "content": "Begin the interview with the first question."})
 
-    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=700, json_mode=True)
+    result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=700, json_mode=True)
     try:
         parsed = _parse_json_reply(result["reply"])
         return {
@@ -385,7 +407,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
         {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
-    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=1200, json_mode=True)
+    result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=1200, json_mode=True)
     try:
         report = _parse_json_reply(result["reply"])
     except json.JSONDecodeError:
