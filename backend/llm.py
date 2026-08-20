@@ -74,7 +74,7 @@ def _log_usage(entry: dict):
         f.write(json.dumps(entry) + "\n")
 
 
-def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 300, json_mode: bool = False) -> dict:
+def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 500, json_mode: bool = False) -> dict:
     """
     Shared low-level call: posts `messages` to the configured
     OpenAI-compatible chat completions endpoint, logs usage, and returns
@@ -271,7 +271,7 @@ def interview_turn(
     else:
         messages.append({"role": "user", "content": "Begin the interview with the first question."})
 
-    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=250, json_mode=True)
+    result = _call_chat(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=700, json_mode=True)
     try:
         parsed = _parse_json_reply(result["reply"])
         return {
