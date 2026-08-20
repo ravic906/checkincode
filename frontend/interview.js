@@ -431,7 +431,7 @@ async function endInterview() {
       method: "POST",
       body: JSON.stringify({ session_id: interviewState.sessionId }),
     });
-    renderFeedback(res.feedback, res.conversation);
+    renderFeedback(res.feedback);
   } catch (err) {
     screen.innerHTML = `<div class="feedback-report">
       <div class="result-banner fail">Couldn't generate feedback: ${escapeHtml(err.message)}</div>
@@ -448,7 +448,7 @@ const LEVEL_META = {
   advanced: { icon: "●", label: "Advanced" },
 };
 
-function renderFeedback(report, transcript) {
+function renderFeedback(report) {
   const screen = document.getElementById("interviewScreen");
   const level = LEVEL_META[report.rough_level] || LEVEL_META.intermediate;
   screen.innerHTML = `
@@ -475,11 +475,6 @@ function renderFeedback(report, transcript) {
 
       <h3 class="feedback-section-title">Topics to Study</h3>
       <div class="topic-pills">${(report.topics_to_study || []).map(t => `<span class="topic-pill">${escapeHtml(t)}</span>`).join("") || "—"}</div>
-
-      <h3 class="feedback-section-title">Full Transcript</h3>
-      <div class="interview-transcript static">
-        ${transcript.map(renderChatBubble).join("")}
-      </div>
 
       <button class="submit-btn" id="backHomeBtn">Back to home</button>
     </div>

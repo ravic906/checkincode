@@ -202,7 +202,13 @@ def ask_followup(
     return {"answer": result["reply"], "usage": result["usage"]}
 
 
-def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
+def _interview_system_prompt(
+    topics: list[str],
+    resume_text: str | None,
+    current_topic: str | None = None,
+    topic_turn_count: int = 0,
+    max_turns_per_topic: int = 3,
+) -> str:
     resume_block = ""
     if resume_text:
         resume_block = (
@@ -212,6 +218,25 @@ def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
             "verbatim):\n"
             f"{resume_text[:4000]}\n\n"
         )
+
+    topic_budget_block = ""
+    if current_topic and topic_turn_count >= max_turns_per_topic:
+        topic_budget_block = (
+            f"You have already spent {topic_turn_count} question(s) on the "
+            f"current topic ('{current_topic}'), which is the limit "
+            f"({max_turns_per_topic}) for a single topic. Regardless of how "
+            "the candidate just answered, you MUST switch_topic now to a "
+            "topic from the list that hasn't been covered yet -- do not "
+            "follow_up or probe further on this topic.\n\n"
+        )
+    elif current_topic:
+        topic_budget_block = (
+            f"You are currently on '{current_topic}' -- {topic_turn_count} "
+            f"question(s) asked so far, {max_turns_per_topic} max before "
+            "you must move to a new topic. Keep that budget in mind when "
+            "choosing follow_up/probe vs switch_topic.\n\n"
+        )
+
     return (
         "You are conducting a live, spoken SQL technical interview for a "
         "candidate applying to a data/analytics role in India. Ask ONE "
@@ -219,6 +244,7 @@ def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
         "bullet points, no code blocks, since your question will be read "
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
         f"{resume_block}"
+        f"{topic_budget_block}"
         f"Topics to cover across the interview: {', '.join(topics)}.\n\n"
         "Whenever your question refers to a table (e.g. 'suppose you have a "
         "table called orders...'), you MUST invent a concrete schema and a "
@@ -286,16 +312,20 @@ def interview_turn(
     topics: list[str],
     resume_text: str | None,
     conversation: list[dict],
+    current_topic: str | None = None,
+    topic_turn_count: int = 0,
 ) -> dict:
     """
     Decides the next interview question. `conversation` is the full turn
     history so far as [{"role": "assistant"|"user", "content": ...}, ...]
-    (may be empty for the very first question). Returns:
+    (may be empty for the very first question). `current_topic`/
+    `topic_turn_count` let the prompt enforce a max-turns-per-topic budget
+    so the interviewer can't linger indefinitely on one scenario. Returns:
         {"action": str, "topic": str, "question": str, "usage": {...}}
     Falls back to a generic switch_topic question if the model's reply isn't
     valid JSON, so a single malformed response doesn't break the interview.
     """
-    messages = [{"role": "system", "content": _interview_system_prompt(topics, resume_text)}]
+    messages = [{"role": "system", "content": _interview_system_prompt(topics, resume_text, current_topic, topic_turn_count)}]
     if conversation:
         # Chat APIs only accept {role, content} -- strip our extra "topic" bookkeeping field.
         messages.extend({"role": t["role"], "content": t["content"]} for t in conversation)

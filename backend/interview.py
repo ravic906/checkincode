@@ -18,6 +18,7 @@ import uuid
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
 MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
+MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 
 GENERIC_TOPICS = [
     "SELECT / WHERE filtering basics",
@@ -48,6 +49,8 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
         "started_at": time.time(),
         "topics_covered": [],  # list of {"topic": str, "depth": int}
         "conversation": [],  # [{"role": "assistant"|"user", "content": str, "topic": str|None}]
+        "current_topic": None,
+        "current_topic_turns": 0,
         "ended": False,
         "feedback": None,
     }
@@ -73,3 +76,16 @@ def is_time_up(session: dict) -> bool:
 
 def record_turn(session: dict, role: str, content: str, topic: str | None = None):
     session["conversation"].append({"role": role, "content": content, "topic": topic})
+
+
+def update_topic_tracking(session: dict, action: str, topic: str):
+    """
+    Tracks how many consecutive question-turns have been spent on the
+    current topic, so the interview prompt can enforce MAX_TURNS_PER_TOPIC
+    regardless of the model's own judgment.
+    """
+    if action == "switch_topic" or session["current_topic"] != topic:
+        session["current_topic"] = topic
+        session["current_topic_turns"] = 1
+    else:
+        session["current_topic_turns"] += 1

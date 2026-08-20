@@ -366,6 +366,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         question, topic, action, table_context = INTRO_QUESTION, "intro", "intro", None
 
     interview.record_turn(session, "assistant", question, topic)
+    interview.update_topic_tracking(session, action, topic)
 
     return {
         "session_id": session["session_id"],
@@ -405,6 +406,8 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             topics=interview.GENERIC_TOPICS,
             resume_text=session["resume_text"],
             conversation=session["conversation"],
+            current_topic=session["current_topic"],
+            topic_turn_count=session["current_topic_turns"],
         )
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a
@@ -413,6 +416,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
         raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
 
     interview.record_turn(session, "assistant", result["question"], result["topic"])
+    interview.update_topic_tracking(session, result["action"], result["topic"])
 
     return {
         "time_up": False,
