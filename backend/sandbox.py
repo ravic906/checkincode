@@ -69,7 +69,14 @@ def validate_student_sql(query: str) -> str:
 
 
 def _execute(problem: dict, query: str):
-    con = duckdb.connect(":memory:")
+    # The keyword blocklist below only stops SQL *statements* that mutate
+    # state (INSERT/DROP/etc). It does nothing to stop DuckDB *table
+    # functions* that read the local filesystem or network -- read_csv(),
+    # glob(), read_parquet('http://...'), etc. are all still plain SELECTs.
+    # disabling external access at the connection level is the real fix;
+    # confirmed this blocks read_csv_auto('/etc/passwd') and glob() while
+    # leaving normal queries against the seeded in-memory tables untouched.
+    con = duckdb.connect(":memory:", config={"enable_external_access": False})
     try:
         con.execute(problem["schema_sql"])
         con.execute(problem["seed_sql"])

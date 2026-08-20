@@ -19,6 +19,7 @@ auth system before launch):
 """
 
 import datetime
+import hmac
 import os
 import uuid
 from collections import defaultdict
@@ -126,15 +127,16 @@ def api_get_problem(problem_id: str):
     if not p:
         raise HTTPException(404, "Problem not found")
 
-    con = duckdb.connect(":memory:")
+    con = duckdb.connect(":memory:", config={"enable_external_access": False})
     try:
         con.execute(p["schema_sql"])
         con.execute(p["seed_sql"])
         table_names = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
         sample_tables = {}
         for t in table_names:
-            cols = [d[0] for d in con.execute(f"SELECT * FROM {t} LIMIT 0").description]
-            rows = con.execute(f"SELECT * FROM {t} LIMIT 15").fetchall()
+            quoted = '"' + t.replace('"', '""') + '"'
+            cols = [d[0] for d in con.execute(f"SELECT * FROM {quoted} LIMIT 0").description]
+            rows = con.execute(f"SELECT * FROM {quoted} LIMIT 15").fetchall()
             sample_tables[t] = {
                 "columns": cols,
                 "rows": [[sandbox._normalize_cell(v) for v in r] for r in rows],
@@ -322,13 +324,18 @@ def _require_paid(u: dict):
         )
 
 
+MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB -- a resume has no business being bigger
+
+
 @app.post("/api/interview/parse-resume")
 async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None)):
     user_id = x_user_id or str(uuid.uuid4())
     u = _get_usage(user_id)
     _require_paid(u)
 
-    file_bytes = await file.read()
+    file_bytes = await file.read(MAX_RESUME_UPLOAD_BYTES + 1)
+    if len(file_bytes) > MAX_RESUME_UPLOAD_BYTES:
+        raise HTTPException(413, "Resume file too large -- 5 MB max.")
     try:
         text = resume_parser.extract_text(file.filename, file_bytes)
     except resume_parser.UnsupportedResumeFormat as e:
@@ -500,7 +507,12 @@ class GenerateBatchRequest(BaseModel):
 
 
 def _require_admin(x_admin_token: str | None):
-    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+    # hmac.compare_digest instead of != -- plain string comparison short-
+    # circuits on the first differing byte, which leaks how many
+    # characters of the token you got right via response-time
+    # differences. Doesn't matter much on Render's jittery network, but
+    # it's a one-line fix for a real (if low-severity) timing side channel.
+    if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(403, "Invalid or missing admin token.")
 
 
