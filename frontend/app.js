@@ -97,7 +97,6 @@ function pillClass(difficulty) {
 function renderProblemList() {
   const diff = document.getElementById("difficultyFilter").value;
   const tag = document.getElementById("tagFilter").value;
-  const topic = document.getElementById("topicFilter").value;
   const access = document.getElementById("accessFilter").value;
   const list = document.getElementById("problemList");
   list.innerHTML = "";
@@ -105,7 +104,6 @@ function renderProblemList() {
   const filtered = allProblems.filter(p =>
     (!diff || p.difficulty === diff)
     && (!tag || p.tags.includes(tag))
-    && (!topic || p.topic === topic)
     && (!access || (access === "free" ? p.is_free : !p.is_free))
   );
 
@@ -132,18 +130,6 @@ function populateTagFilter() {
   allProblems.forEach(p => p.tags.forEach(t => tagSet.add(t)));
   const select = document.getElementById("tagFilter");
   [...tagSet].sort().forEach(t => {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    select.appendChild(opt);
-  });
-}
-
-function populateTopicFilter() {
-  const topicSet = new Set();
-  allProblems.forEach(p => { if (p.topic) topicSet.add(p.topic); });
-  const select = document.getElementById("topicFilter");
-  [...topicSet].sort().forEach(t => {
     const opt = document.createElement("option");
     opt.value = t;
     opt.textContent = t;
@@ -410,12 +396,10 @@ async function init() {
   const [problemsRes] = await Promise.all([api("/api/problems"), refreshTierBadge()]);
   allProblems = problemsRes.problems;
   populateTagFilter();
-  populateTopicFilter();
   renderProblemList();
 
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("tagFilter").onchange = renderProblemList;
-  document.getElementById("topicFilter").onchange = renderProblemList;
   document.getElementById("accessFilter").onchange = renderProblemList;
 
   const tutorToggle = document.getElementById("tutorToggle");
