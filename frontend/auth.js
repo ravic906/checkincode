@@ -1,8 +1,14 @@
 /*
  * Clerk auth wiring. Loaded before app.js so `getAuthToken()` and
- * `isSignedIn()` are available to it. The Clerk script tag in index.html
- * sets up `window.Clerk` asynchronously -- everything here waits on
- * `Clerk.load()` before touching it.
+ * `isSignedIn()` are available to it.
+ *
+ * Both Clerk script tags (@clerk/ui then @clerk/clerk-js, see index.html)
+ * are `defer`red, so by the window `load` event they've both finished
+ * executing and `window.Clerk` + `window.__internal_ClerkUICtor` exist --
+ * this is Clerk's own documented init pattern for the no-bundler script-tag
+ * setup, not something to swap back to polling for `window.Clerk` alone
+ * (that was the bug: newer clerk-js needs the UI package wired in via
+ * Clerk.load({ ui: ... }) before it fully initializes).
  *
  * This is additive, not a hard cutover yet: app.js still generates/uses
  * its own anonymous X-User-Id for API calls. Once a user signs in, we
@@ -17,22 +23,16 @@ let clerkReady = null; // Promise, resolves once Clerk.load() has finished
 function waitForClerk() {
   if (clerkReady) return clerkReady;
   clerkReady = new Promise((resolve, reject) => {
-    let attempts = 0;
-    const check = () => {
-      attempts++;
-      if (window.Clerk) {
-        console.log("[auth] window.Clerk found after", attempts * 50, "ms, calling load()...");
-        window.Clerk.load()
-          .then(() => { console.log("[auth] Clerk.load() resolved"); resolve(window.Clerk); })
-          .catch((e) => { console.error("[auth] Clerk.load() REJECTED:", e); reject(e); });
-      } else if (attempts > 200) { // 10s
-        console.error("[auth] window.Clerk never appeared after 10s -- script tag likely failed to load/execute");
-        reject(new Error("Clerk script never loaded"));
-      } else {
-        setTimeout(check, 50);
+    window.addEventListener("load", async () => {
+      try {
+        await window.Clerk.load({
+          ui: { ClerkUI: window.__internal_ClerkUICtor },
+        });
+        resolve(window.Clerk);
+      } catch (e) {
+        reject(e);
       }
-    };
-    check();
+    });
   });
   return clerkReady;
 }
