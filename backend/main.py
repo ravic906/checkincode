@@ -37,6 +37,7 @@ import sandbox
 import llm
 import interview
 import resume_parser
+import stt
 import db
 import topics
 import auth
@@ -457,6 +458,32 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         "remaining_seconds": interview.remaining_seconds(session),
         "duration_seconds": session["duration_seconds"],
     }
+
+
+MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB -- generously covers even a long spoken answer at typical voice bitrates
+
+
+@app.post("/api/interview/stt")
+async def api_interview_stt(file: UploadFile = File(...), x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Transcribes one recorded answer to text. Rides along with the same
+    gate as the rest of the interview (Pro tier or the one free trial) --
+    no separate STT quota, since you can't call this outside an interview
+    anyway and the interview-level cap (trial count / MAX_INTERVIEWS_PER_MONTH)
+    already limits exposure.
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
+    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
+
+    audio_bytes = await file.read(MAX_AUDIO_UPLOAD_BYTES + 1)
+    if len(audio_bytes) > MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(413, "Recording too large.")
+    try:
+        text = stt.transcribe(audio_bytes, file.filename or "answer.webm")
+    except RuntimeError as e:
+        raise HTTPException(502, f"Voice transcription unavailable right now ({e}).")
+    return {"text": text}
 
 
 @app.post("/api/interview/answer")
