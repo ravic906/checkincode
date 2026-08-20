@@ -187,6 +187,26 @@ def api_reset_submissions(x_user_id: str = Header(default=None), authorization: 
     return {"deleted": deleted}
 
 
+class MergeProgressRequest(BaseModel):
+    anonymous_user_id: str
+
+
+@app.post("/api/merge-progress")
+def api_merge_progress(req: MergeProgressRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """Folds progress made anonymously (before signing in) into the real
+    account. The frontend calls this right after detecting a fresh
+    sign-in, passing the browser's old anonymous X-User-Id -- that id
+    never changes once assigned, so it's the same one whatever solving
+    happened under before an account existed."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    if not user_id.startswith("clerk:"):
+        raise HTTPException(401, "Sign in first.")
+    if not req.anonymous_user_id or req.anonymous_user_id == user_id:
+        return {"merged_submissions": 0}
+    merged = problems_module.merge_user_progress(req.anonymous_user_id, user_id)
+    return {"merged_submissions": merged}
+
+
 class VerifyPaymentRequest(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str

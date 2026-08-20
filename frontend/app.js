@@ -448,11 +448,29 @@ async function sendFollowup() {
   }
 }
 
+let _wasSignedIn = false;
+
 async function refreshIdentityDependentState() {
   // Re-pulls anything keyed off "who is this" -- tier, locked/solved status
   // -- since the answer can change out from under the initial page load
   // (Clerk finishes loading after our first render) or at runtime (sign
   // in/out, an upgrade completing).
+  const nowSignedIn = typeof isSignedIn === "function" && isSignedIn();
+  if (nowSignedIn && !_wasSignedIn) {
+    // Just transitioned into signed-in -- fold whatever solving happened
+    // anonymously on this browser (under the localStorage id that never
+    // changes) into the real account before it looks like a blank slate.
+    try {
+      await api("/api/merge-progress", {
+        method: "POST",
+        body: JSON.stringify({ anonymous_user_id: USER_ID }),
+      });
+    } catch (e) {
+      console.error("[merge-progress] failed:", e);
+    }
+  }
+  _wasSignedIn = nowSignedIn;
+
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
   renderProblemList();

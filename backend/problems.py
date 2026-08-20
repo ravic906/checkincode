@@ -2424,6 +2424,23 @@ def reset_user_submissions(user_id: str) -> int:
             return cur.rowcount
 
 
+def merge_user_progress(from_user_id: str, to_user_id: str) -> int:
+    """Moves all of from_user_id's submission rows onto to_user_id.
+    Called right after someone signs in, to fold whatever progress they
+    made anonymously on this browser (keyed by the old X-User-Id) into
+    their real account instead of losing it. A plain UPDATE is enough --
+    submissions logs every attempt rather than enforcing one row per
+    (user, problem), so there's no unique-constraint conflict to resolve.
+    Safe to call repeatedly: a no-op once nothing's left under the old id."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE submissions SET user_id = %s WHERE user_id = %s",
+                (to_user_id, from_user_id),
+            )
+            return cur.rowcount
+
+
 class InvalidDraftProblem(Exception):
     pass
 
