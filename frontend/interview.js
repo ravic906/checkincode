@@ -306,8 +306,10 @@ async function endInterview() {
     });
     renderFeedback(res.feedback, res.conversation);
   } catch (err) {
-    screen.innerHTML = `<div class="result-banner fail">Couldn't generate feedback: ${escapeHtml(err.message)}</div>
-      <button class="run-btn" id="backHomeBtn2">Back to home</button>`;
+    screen.innerHTML = `<div class="feedback-report">
+      <div class="result-banner fail">Couldn't generate feedback: ${escapeHtml(err.message)}</div>
+      <button class="submit-btn" id="backHomeBtn2">Back to home</button>
+    </div>`;
     document.getElementById("backHomeBtn2").onclick = showHome;
   }
   interviewState = null;

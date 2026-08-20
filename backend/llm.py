@@ -311,7 +311,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
         {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
-    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=600, json_mode=True)
+    result = _call_chat(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=1200, json_mode=True)
     try:
         report = _parse_json_reply(result["reply"])
     except json.JSONDecodeError:
