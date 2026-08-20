@@ -220,6 +220,15 @@ def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
         f"{resume_block}"
         f"Topics to cover across the interview: {', '.join(topics)}.\n\n"
+        "Whenever your question refers to a table (e.g. 'suppose you have a "
+        "table called orders...'), you MUST invent a concrete schema and a "
+        "handful of sample rows for it, and put them in `table_context` -- "
+        "never leave the candidate to imagine column names or data on their "
+        "own, they need to actually see it on screen. Reuse the SAME table "
+        "(set table_context to null) for follow_up or probe questions still "
+        "about that table; only invent a new table_context when you "
+        "switch_topic to a scenario that needs a different table, or for "
+        "the very first question.\n\n"
         "After the candidate's most recent answer, decide exactly one of:\n"
         "- follow_up: there is a specific gap, vagueness, or mistake in "
         "their answer -- ask a targeted follow-up on the SAME topic to "
@@ -233,9 +242,23 @@ def _interview_system_prompt(topics: list[str], resume_text: str | None) -> str:
         "Only ask about SQL, databases, and data engineering concepts. If "
         "the candidate goes off-topic, gently redirect back to the "
         "interview.\n\n"
+        "The candidate's answers come from speech-to-text and can arrive "
+        "garbled, truncated, or as gibberish unrelated to your question -- "
+        "that's a transcription glitch, not necessarily the candidate being "
+        "wrong. NEVER just repeat your previous question verbatim; that "
+        "reads as a robot malfunctioning. If the answer looks like it may "
+        "not have transcribed correctly (very short, nonsensical, or "
+        "completely off-topic from a clear technical question), say "
+        "something like \"Sorry, I didn't quite catch that -- could you say "
+        "that again?\" and rephrase your question differently, or ask them "
+        "to repeat more slowly. Always vary your wording turn to turn.\n\n"
         "Respond with ONLY a JSON object, no other text, no markdown code "
         'fences: {"action": "follow_up"|"probe"|"switch_topic", "topic": '
-        '"<topic name>", "question": "<your next spoken question>"}'
+        '"<topic name>", "question": "<your next spoken question>", '
+        '"table_context": null | {"table_name": "<name>", "schema": '
+        '"<CREATE TABLE ... statement as one line>", "sample_rows": '
+        '"<a small markdown table of 3-6 example rows, columns separated '
+        'by | >"}}'
     )
 
 
@@ -278,6 +301,7 @@ def interview_turn(
             "action": parsed.get("action", "switch_topic"),
             "topic": parsed.get("topic", topics[0]),
             "question": parsed["question"],
+            "table_context": parsed.get("table_context"),
             "usage": result["usage"],
         }
     except (json.JSONDecodeError, KeyError):
@@ -285,6 +309,7 @@ def interview_turn(
             "action": "switch_topic",
             "topic": topics[0],
             "question": result["reply"],
+            "table_context": None,
             "usage": result["usage"],
         }
 

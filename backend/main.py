@@ -359,9 +359,9 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
             )
         except Exception as e:
             raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
-        question, topic, action = result["question"], result["topic"], result["action"]
+        question, topic, action, table_context = result["question"], result["topic"], result["action"], result["table_context"]
     else:
-        question, topic, action = INTRO_QUESTION, "intro", "intro"
+        question, topic, action, table_context = INTRO_QUESTION, "intro", "intro", None
 
     interview.record_turn(session, "assistant", question, topic)
 
@@ -370,6 +370,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         "question": question,
         "topic": topic,
         "action": action,
+        "table_context": table_context,
         "remaining_seconds": interview.remaining_seconds(session),
     }
 
@@ -416,6 +417,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
         "question": result["question"],
         "topic": result["topic"],
         "action": result["action"],
+        "table_context": result["table_context"],
         "remaining_seconds": interview.remaining_seconds(session),
     }
 
