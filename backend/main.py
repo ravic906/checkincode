@@ -14,9 +14,10 @@ Tiering (Postgres-backed, see users.py):
       that's verified (see auth.py) and used instead -- signing in isn't
       mandatory for practice mode, only for anything tied to a real
       identity (payments).
-    - Free tier: FREE_DAILY_SUBMISSIONS submissions/day, FREE_DAILY_EXPLANATIONS
-      AI explanations/day, plus only the curated free-tier problem subset.
-    - Paid tier: unlimited explanations + submissions + the full problem
+    - Free tier: FREE_DAILY_SUBMISSIONS submissions/day, plus only the
+      curated free-tier problem subset. No AI help ("Ask Phoenix" is a
+      Pro-only feature -- see /api/ask-phoenix).
+    - Paid tier: unlimited submissions + Ask Phoenix + the full problem
       bank + mock interviews. Upgrading goes through Razorpay (payments.py):
       POST /api/payments/create-order then POST /api/payments/verify.
 """
@@ -52,7 +53,6 @@ app.add_middleware(
 )
 
 FREE_DAILY_SUBMISSIONS = 20
-FREE_DAILY_EXPLANATIONS = 3
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 # Precompute expected output for every problem once at startup so grading
@@ -74,16 +74,12 @@ def _startup():
 class SubmitRequest(BaseModel):
     problem_id: str
     query: str
-    want_explanation: bool = True
 
 
-class FollowupRequest(BaseModel):
+class AskPhoenixRequest(BaseModel):
     problem_id: str
-    student_query: str
-    expected_preview: dict
-    actual_preview: dict | None = None
-    error: str | None = None
-    conversation: list[dict]
+    current_query: str | None = None
+    conversation: list[dict] = []
     question: str
 
 
@@ -171,9 +167,7 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "user_id": user_id,
         "tier": u["tier"],
         "submissions_today": u["submissions"],
-        "explanations_today": u["explanations"],
         "free_daily_submissions": FREE_DAILY_SUBMISSIONS,
-        "free_daily_explanations": FREE_DAILY_EXPLANATIONS,
     }
 
 
@@ -274,9 +268,6 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
         "error": None,
         "actual_preview": None,
         "expected_preview": None,
-        "explanation": None,
-        "explanation_available": False,
-        "llm_usage": None,
     }
 
     try:
@@ -297,84 +288,47 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
 
     problems_module.record_submission(user_id, problem["id"], result["correct"])
 
-    if result["correct"]:
-        return result
-
-    # Wrong (or errored) -- only now do we consider calling the LLM.
-    expected_columns, expected_rows = _EXPECTED_CACHE[problem["id"]]
-    result["expected_preview"] = _preview(
-        expected_columns, [[sandbox._normalize_cell(v) for v in r] for r in expected_rows]
-    )
-
-    can_explain = u["tier"] == "paid" or u["explanations"] < FREE_DAILY_EXPLANATIONS
-    result["explanation_available"] = can_explain
-
-    if not req.want_explanation:
-        # Student has the AI tutor toggled off -- don't spend an LLM call
-        # (or a quota slot) they didn't ask for.
-        result["explanation"] = None
-        return result
-
-    if not can_explain:
-        result["explanation"] = None
-        return result
-
-    try:
-        llm_result = llm.get_explanation(
-            user_id=user_id,
-            problem=problem,
-            student_query=req.query,
-            expected_preview=result["expected_preview"],
-            actual_preview=result["actual_preview"] or {},
-            error=result["error"] if result["actual_preview"] is None else None,
+    if not result["correct"]:
+        expected_columns, expected_rows = _EXPECTED_CACHE[problem["id"]]
+        result["expected_preview"] = _preview(
+            expected_columns, [[sandbox._normalize_cell(v) for v in r] for r in expected_rows]
         )
-        result["explanation"] = llm_result["explanation"]
-        result["llm_usage"] = llm_result["usage"]
-        users_module.increment_explanation(user_id)
-    except Exception as e:
-        result["explanation"] = None
-        result["explanation_error"] = f"AI explanation unavailable right now ({e})."
 
     return result
 
 
-@app.post("/api/ask-followup")
-def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+@app.post("/api/ask-phoenix")
+def api_ask_phoenix(req: AskPhoenixRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """
-    Lets a student ask a free-form follow-up question after an AI
-    explanation, e.g. "why does NULL break GROUP BY like that?". Counts
-    against the same daily AI-tutor quota as the initial explanation --
-    it's the same cost category, just a different shape of question.
+    Open-ended contextual help about a problem -- Pro-only, unlimited (no
+    daily quota, unlike the old free-tier explanation counters this
+    replaces). Can be asked at any point while viewing a problem, not just
+    after a wrong submission.
     """
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
+
+    if u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "Ask Phoenix is a Pro feature (₹199/mo) -- upgrade to get contextual AI help on every problem.",
+        )
 
     problem = get_problem(req.problem_id)
     if not problem:
         raise HTTPException(404, "Problem not found")
 
-    if u["tier"] != "paid" and u["explanations"] >= FREE_DAILY_EXPLANATIONS:
-        raise HTTPException(
-            429,
-            f"Daily free AI tutor limit ({FREE_DAILY_EXPLANATIONS}) reached. "
-            "Upgrade to keep asking questions today.",
-        )
-
     try:
-        llm_result = llm.ask_followup(
+        llm_result = llm.ask_phoenix(
             user_id=user_id,
             problem=problem,
-            student_query=req.student_query,
-            expected_preview=req.expected_preview,
-            actual_preview=req.actual_preview or {},
-            error=req.error,
+            current_query=req.current_query,
             conversation=req.conversation,
             question=req.question,
         )
-        users_module.increment_explanation(user_id)
         return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
     except Exception as e:
-        raise HTTPException(502, f"AI tutor unavailable right now ({e}).")
+        raise HTTPException(502, f"Ask Phoenix unavailable right now ({e}).")
 
 
 INTRO_QUESTION = (

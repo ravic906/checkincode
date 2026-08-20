@@ -32,55 +32,35 @@ COST_PER_1M_TOKENS = {
     "completion": 0.08,
 }
 
-HINT_SYSTEM_PROMPT = (
-    "You are a patient SQL tutor helping an Indian IT professional preparing "
-    "for job interviews. A student just submitted a wrong SQL query -- this "
-    "is their first hint for this attempt, before they've asked any "
-    "follow-up. Give them a nudge, not the answer: point at the general area "
-    "of the mistake -- which clause, which concept (e.g. \"look at how "
-    "you're filtering before the join happens\" or \"think about what NULL "
-    "does inside COUNT\") -- without stating the specific fix, without "
-    "writing any corrected or partial SQL, and without naming the exact "
-    "column, condition, or keyword that needs to change. The goal is for "
-    "them to go back and find it themselves. 2-4 sentences, encouraging but "
-    "genuinely withholding the answer -- if they want more, they can ask a "
-    "follow-up."
-)
-
-FOLLOWUP_SYSTEM_PROMPT = (
-    "You are a patient SQL tutor helping an Indian IT professional preparing "
-    "for job interviews, continuing a conversation about a wrong SQL "
-    "submission. You already gave them an initial hint that deliberately "
-    "withheld the answer; they're now asking a specific follow-up question "
-    "because that wasn't enough. Since they're asking directly, you can be "
-    "more concrete than the first hint -- explain the concept and reasoning "
-    "behind the fix -- but still don't just hand over the fully corrected "
-    "query verbatim; make them assemble the final fix themselves.\n\n"
+ASK_PHOENIX_SYSTEM_PROMPT = (
+    "You are Phoenix, a patient SQL tutor helping an Indian IT professional "
+    "preparing for job interviews. The student is looking at a specific SQL "
+    "practice problem and can ask you anything about it at any point -- how "
+    "to approach it, what a concept means, why their in-progress query might "
+    "be wrong, or general SQL/database concepts directly relevant to it. "
+    "They may not have submitted (or even attempted) an answer yet.\n\n"
+    "Guide them conceptually rather than just handing over a fully correct "
+    "query verbatim -- help them think it through. If they share their "
+    "in-progress query, point at what's off without just rewriting it for "
+    "them, unless they explicitly ask you to write it out.\n\n"
     "Only answer questions about this specific SQL problem, their query, or "
     "general SQL/database concepts directly relevant to it (e.g. how JOINs, "
-    "NULLs, GROUP BY, window functions work). If a follow-up is unrelated to "
+    "NULLs, GROUP BY, window functions work). If a question is unrelated to "
     "SQL or this problem (e.g. general trivia, other programming languages, "
     "personal questions), politely decline in one sentence and redirect the "
-    "student back to the SQL problem at hand -- do not answer the off-topic "
+    "student back to the problem at hand -- do not answer the off-topic "
     "question."
 )
 
 
-def _build_user_prompt(problem: dict, student_query: str, expected_preview: dict, actual_preview: dict, error: str | None) -> str:
+def _build_ask_phoenix_context(problem: dict, current_query: str | None) -> str:
     parts = [
         f"Problem: {problem['title']}",
         f"Description: {problem['description']}",
-        f"Student's query:\n{student_query}",
+        f"Schema:\n{problem['schema_sql']}",
     ]
-    if error:
-        parts.append(f"The query failed with this database error:\n{error}")
-    else:
-        parts.append(f"Expected output (columns + first rows): {json.dumps(expected_preview)}")
-        parts.append(f"Student's actual output (columns + first rows): {json.dumps(actual_preview)}")
-    parts.append(
-        "Explain what's wrong with the student's query and what concept "
-        "they should revisit."
-    )
+    if current_query and current_query.strip():
+        parts.append(f"Student's current in-progress query (not yet submitted):\n{current_query}")
     return "\n\n".join(parts)
 
 
@@ -185,53 +165,26 @@ def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 
     raise last_error
 
 
-def get_explanation(
+def ask_phoenix(
     *,
     user_id: str,
     problem: dict,
-    student_query: str,
-    expected_preview: dict,
-    actual_preview: dict,
-    error: str | None = None,
-) -> dict:
-    """
-    Explains a wrong (or erroring) submission. Returns:
-        {"explanation": str, "usage": {...}}
-    """
-    user_prompt = _build_user_prompt(problem, student_query, expected_preview, actual_preview, error)
-    result = _call_chat(
-        user_id=user_id,
-        problem_id=problem["id"],
-        messages=[
-            {"role": "system", "content": HINT_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    return {"explanation": result["reply"], "usage": result["usage"]}
-
-
-def ask_followup(
-    *,
-    user_id: str,
-    problem: dict,
-    student_query: str,
-    expected_preview: dict,
-    actual_preview: dict,
-    error: str | None,
+    current_query: str | None,
     conversation: list[dict],
     question: str,
 ) -> dict:
     """
-    Continues the tutoring conversation with a free-form follow-up question
-    from the student. `conversation` is the prior turns as
-    [{"role": "assistant"|"user", "content": ...}, ...], starting with the
-    initial explanation as the first assistant turn. Returns:
-        {"answer": str, "usage": {...}}
+    Open-ended contextual help about a problem -- unlike the old
+    submission-triggered explanation flow, this can be called at any point
+    while a student is looking at a problem, whether or not they've
+    submitted anything yet. `conversation` is prior turns in this chat as
+    [{"role": "assistant"|"user", "content": ...}, ...], empty on the first
+    message. Returns {"answer": str, "usage": {...}}.
     """
-    initial_context = _build_user_prompt(problem, student_query, expected_preview, actual_preview, error)
+    context = _build_ask_phoenix_context(problem, current_query)
     messages = [
-        {"role": "system", "content": FOLLOWUP_SYSTEM_PROMPT},
-        {"role": "user", "content": initial_context},
+        {"role": "system", "content": ASK_PHOENIX_SYSTEM_PROMPT},
+        {"role": "user", "content": context},
     ]
     messages.extend(conversation)
     messages.append({"role": "user", "content": question})

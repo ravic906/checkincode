@@ -58,17 +58,6 @@ body {
 
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 
-.tutor-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-}
-.tutor-toggle input { accent-color: var(--accent); cursor: pointer; }
-
 .tier-badge {
   font-size: 12px;
   padding: 5px 12px;
@@ -286,18 +275,6 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .result-banner.pass { background: rgba(56,193,114,0.12); color: var(--green); border: 1px solid rgba(56,193,114,0.3); }
 .result-banner.fail { background: rgba(227,86,74,0.12); color: var(--red); border: 1px solid rgba(227,86,74,0.3); }
 
-.explanation-box {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 8px;
-  padding: 14px 16px;
-  font-size: 13px;
-  line-height: 1.6;
-  margin-bottom: 14px;
-}
-.explanation-box .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); font-weight: 700; margin-bottom: 6px; }
-
 .upsell-box {
   background: linear-gradient(135deg, rgba(246,211,101,0.1), rgba(253,160,133,0.1));
   border: 1px solid rgba(253,160,133,0.3);
@@ -322,8 +299,9 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .diff-preview .col h4 { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 0; }
 
 .loading-dots { color: var(--muted); font-size: 13px; }
+.ask-phoenix-hint { color: var(--muted); font-size: 13px; }
+.ask-phoenix-hint strong { color: var(--text); }
 
-.followup-thread { margin-top: 4px; }
 .followup-turn {
   padding: 10px 14px;
   border-radius: 8px;
@@ -335,32 +313,127 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .followup-turn.assistant { background: rgba(79,140,255,0.08); border: 1px solid rgba(79,140,255,0.25); margin-right: 24px; }
 .followup-turn .who { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; font-weight: 700; }
 
-.followup-input-row {
+/* Ask Phoenix -- floating trigger + slide-in panel (desktop) / bottom
+   sheet (mobile, see the responsive block below). Only shown while a
+   problem is loaded, toggled from app.js. */
+.ask-phoenix-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff8a3d, #ff3d5a, #a53dff);
+  background-size: 200% 200%;
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 24px -8px rgba(255, 61, 90, 0.6);
+  animation: askPhoenixShimmer 4s ease infinite;
+  transition: transform 0.15s;
+}
+.ask-phoenix-fab:hover { transform: translateY(-2px) scale(1.03); }
+.ask-phoenix-fab svg { width: 18px; height: 18px; flex-shrink: 0; }
+@keyframes askPhoenixShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-phoenix-fab { animation: none; }
+}
+
+.ask-phoenix-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: flex-end;
+}
+.ask-phoenix-panel {
+  width: 420px;
+  max-width: 100%;
+  height: 100%;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 32px -12px rgba(0, 0, 0, 0.5);
+}
+.ask-phoenix-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ask-phoenix-title {
+  font-size: 16px;
+  font-weight: 800;
+  background: linear-gradient(90deg, #ff8a3d, #ff3d5a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ask-phoenix-subtitle { font-size: 12px; color: var(--muted); margin-top: 3px; max-width: 320px; }
+.ask-phoenix-close {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ask-phoenix-close:hover { color: var(--text); border-color: var(--accent); }
+.ask-phoenix-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.ask-phoenix-thread { flex: 1; }
+.ask-phoenix-empty { color: var(--muted); font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.ask-phoenix-input-row {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.followup-input-row input {
+.ask-phoenix-input-row input {
   flex: 1;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
-  padding: 9px 12px;
+  padding: 10px 12px;
   font-size: 13px;
+  font-family: inherit;
 }
-.followup-input-row button {
-  background: var(--accent);
+.ask-phoenix-input-row button {
+  background: linear-gradient(135deg, #ff8a3d, #ff3d5a);
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 9px 16px;
+  padding: 10px 18px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
 }
-.followup-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ask-phoenix-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Home screen */
 .home-screen {
@@ -500,6 +573,20 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
   #editor { height: 180px; }
 
+  /* Ask Phoenix: a 420px docked side panel doesn't work on a narrow
+     screen, so it becomes a bottom sheet covering most of the viewport
+     instead -- same overlay/header/body/input structure, just anchored
+     to the bottom edge and full-width. */
+  .ask-phoenix-fab { right: 16px; bottom: 16px; padding: 11px 16px; font-size: 13px; }
+  .ask-phoenix-overlay { align-items: flex-end; }
+  .ask-phoenix-panel {
+    width: 100%;
+    height: 85vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+  }
+
   .track-grid { flex-direction: column; align-items: center; }
   .track-card { width: 100%; max-width: 320px; }
   .home-screen { padding: 24px 16px; }
@@ -516,7 +603,7 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   .editor-toolbar { flex-wrap: wrap; gap: 8px; }
   .editor-toolbar .actions { width: 100%; }
   button.run-btn, button.submit-btn { flex: 1; }
-  .followup-input-row { flex-direction: column; }
+  .ask-phoenix-input-row { flex-direction: column; }
   .followup-turn.user, .followup-turn.assistant { margin-left: 0; margin-right: 0; }
   .feedback-cols { grid-template-columns: 1fr; }
 }

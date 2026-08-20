@@ -36,35 +36,26 @@ async function api(path, options = {}) {
 let allProblems = [];
 let currentProblem = null;
 let monacoEditor = null;
-
-// Follow-up chat state for the currently-shown result. Reset on every new run/submit.
-let followupState = null; // { studentQuery, expectedPreview, actualPreview, error, conversation: [{role, content}] }
-
-function getTutorEnabled() {
-  // Explain is a signed-in feature -- the toggle that controls it is
-  // hidden pre-sign-in (see updateSignInGatedUI), so don't silently keep
-  // requesting explanations behind the scenes for a control the user
-  // can't see or turn off.
-  if (typeof isSignedIn !== "function" || !isSignedIn()) return false;
-  const v = localStorage.getItem("sqlpractice_tutor_enabled");
-  return v === null ? true : v === "true";
-}
-function setTutorEnabled(enabled) {
-  localStorage.setItem("sqlpractice_tutor_enabled", String(enabled));
-}
+let currentTier = "free"; // kept in sync by refreshTierBadge(); Ask Phoenix reads this to decide chat-vs-upsell
 
 let _onPracticeScreen = false;
 
 function updateSignInGatedUI() {
-  // Reset Progress and the Explain toggle only make sense (a) while on
-  // the practice screen, where there's actually something to reset/
-  // explain, and (b) once signed in -- an anonymous browser id isn't a
-  // real account, so offering account-flavored controls before sign-in
-  // is just confusing.
+  // Reset Progress only makes sense (a) while on the practice screen,
+  // where there's actually something to reset, and (b) once signed in --
+  // an anonymous browser id isn't a real account, so offering it before
+  // sign-in is just confusing.
   const signedIn = typeof isSignedIn === "function" && isSignedIn();
-  const show = _onPracticeScreen && signedIn;
-  document.getElementById("resetProgressBtn").style.display = show ? "inline-block" : "none";
-  document.getElementById("tutorToggleWrap").style.display = show ? "flex" : "none";
+  document.getElementById("resetProgressBtn").style.display =
+    (_onPracticeScreen && signedIn) ? "inline-block" : "none";
+}
+
+function updateAskPhoenixFabVisibility() {
+  // Only makes sense while an actual problem is loaded and gradeable --
+  // hidden on the home/interview screens and on the bare practice-screen
+  // empty state.
+  document.getElementById("askPhoenixFab").style.display =
+    (_onPracticeScreen && currentProblem) ? "flex" : "none";
 }
 
 function showHome() {
@@ -73,6 +64,8 @@ function showHome() {
   document.getElementById("interviewScreen").style.display = "none";
   _onPracticeScreen = false;
   updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
+  closeAskPhoenix();
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
@@ -81,6 +74,7 @@ function showSqlTrack() {
   document.getElementById("interviewScreen").style.display = "none";
   _onPracticeScreen = true;
   updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
@@ -88,14 +82,17 @@ function showInterviewScreen() {
   document.getElementById("interviewScreen").style.display = "flex";
   _onPracticeScreen = false;
   updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
+  closeAskPhoenix();
 }
 
 async function refreshTierBadge() {
   const usage = await api("/api/usage");
+  currentTier = usage.tier;
   const badge = document.getElementById("tierBadge");
   badge.classList.toggle("paid", usage.tier === "paid");
   if (usage.tier === "paid") {
-    badge.innerHTML = `Pro — full problem library, unlimited explanations`;
+    badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix`;
   } else {
     // The daily submission/explanation counters rarely bind in practice --
     // the free-tier problem lock is the restriction that actually
@@ -241,6 +238,8 @@ function escapeHtml(s) {
 }
 
 function showUpsell() {
+  currentProblem = null;
+  updateAskPhoenixFabVisibility();
   document.getElementById("workspace").innerHTML = `
     <div class="empty-state upsell-box">
       This problem is part of Pro. Upgrade to ₹199/mo to unlock every practice problem.
@@ -259,8 +258,9 @@ async function loadProblem(id) {
     throw e;
   }
   currentProblem = p;
-  followupState = null;
+  askPhoenixConversation = [];
   renderProblemList();
+  updateAskPhoenixFabVisibility();
 
   const tablesHtml = Object.entries(p.sample_tables)
     .map(([name, table]) => renderTable(name, table))
@@ -327,7 +327,6 @@ async function runQuery(isSubmit) {
   const query = monacoEditor.getValue();
   const resultsSection = document.getElementById("resultsSection");
   resultsSection.innerHTML = `<div class="loading-dots">Running against DuckDB…</div>`;
-  followupState = null;
 
   const runBtn = document.getElementById("runBtn");
   const submitBtn = document.getElementById("submitBtn");
@@ -337,13 +336,9 @@ async function runQuery(isSubmit) {
   try {
     const result = await api("/api/submit", {
       method: "POST",
-      body: JSON.stringify({
-        problem_id: currentProblem.id,
-        query,
-        want_explanation: getTutorEnabled(),
-      }),
+      body: JSON.stringify({ problem_id: currentProblem.id, query }),
     });
-    renderResult(result, isSubmit, query);
+    renderResult(result);
     if (result.correct) {
       const problemsRes = await api("/api/problems");
       allProblems = problemsRes.problems;
@@ -368,9 +363,8 @@ async function runQuery(isSubmit) {
   }
 }
 
-function renderResult(result, isSubmit, studentQuery) {
+function renderResult(result) {
   const resultsSection = document.getElementById("resultsSection");
-  const tutorOn = getTutorEnabled();
   let html = "";
 
   if (result.correct) {
@@ -385,94 +379,107 @@ function renderResult(result, isSubmit, studentQuery) {
       </div>`;
     }
 
-    if (!tutorOn) {
-      // Tutor toggled off client-side -- backend already skipped the LLM call.
-    } else if (result.explanation) {
-      html += `<div class="explanation-box"><div class="label">Explain</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
-      html += `<div id="followupThread" class="followup-thread"></div>
-        <div class="followup-input-row">
-          <input type="text" id="followupInput" placeholder="Ask a follow-up question about this problem…" />
-          <button id="followupSendBtn">Ask</button>
-        </div>`;
-      followupState = {
-        studentQuery,
-        expectedPreview: result.expected_preview,
-        actualPreview: result.actual_preview,
-        error: result.actual_preview ? null : result.error,
-        conversation: [{ role: "assistant", content: result.explanation }],
-      };
-    } else if (result.explanation_error) {
-      html += `<div class="explanation-box"><div class="label">Explain</div>${escapeHtml(result.explanation_error)}</div>`;
-    } else if (!result.explanation_available) {
-      html += `<div class="upsell-box">
-        You've used today's free explanations. Upgrade to Pro (₹199/mo) for unlimited help.
-        <br/><button id="inlineUpgradeBtn">Upgrade now</button>
-      </div>`;
-    }
+    html += `<p class="ask-phoenix-hint">Stuck? Tap <strong>Ask Phoenix</strong> for help with this problem.</p>`;
   }
 
   resultsSection.innerHTML = html;
   const upBtn = document.getElementById("inlineUpgradeBtn");
   if (upBtn) upBtn.onclick = doUpgrade;
-
-  const sendBtn = document.getElementById("followupSendBtn");
-  const followupInput = document.getElementById("followupInput");
-  if (sendBtn && followupInput) {
-    sendBtn.onclick = sendFollowup;
-    followupInput.onkeydown = (e) => { if (e.key === "Enter") sendFollowup(); };
-  }
 }
 
-function renderFollowupThread() {
-  const thread = document.getElementById("followupThread");
-  if (!thread || !followupState) return;
-  // Skip turn 0 (the initial explanation) -- it's already shown above in the explanation box.
-  const turns = followupState.conversation.slice(1);
-  thread.innerHTML = turns.map(t => `
+// -------- Ask Phoenix: open-ended contextual help, any time a problem is loaded --------
+
+let askPhoenixConversation = []; // [{role: "user"|"assistant", content}], reset whenever the loaded problem changes
+
+function openAskPhoenix() {
+  document.getElementById("askPhoenixOverlay").style.display = "flex";
+  document.getElementById("askPhoenixSubtitle").textContent = currentProblem ? currentProblem.title : "";
+  renderAskPhoenixBody();
+}
+
+function closeAskPhoenix() {
+  const overlay = document.getElementById("askPhoenixOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+function renderAskPhoenixBody() {
+  const body = document.getElementById("askPhoenixBody");
+  if (currentTier !== "paid") {
+    body.innerHTML = `
+      <div class="upsell-box">
+        Ask Phoenix is a Pro feature -- get contextual AI help on any problem, any time, not just after a wrong answer.
+        Upgrade to ₹199/mo to unlock it.
+        <br/><button id="askPhoenixUpgradeBtn">Upgrade now</button>
+      </div>
+    `;
+    document.getElementById("askPhoenixUpgradeBtn").onclick = doUpgrade;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="ask-phoenix-thread" id="askPhoenixThread"></div>
+    <div class="ask-phoenix-input-row">
+      <input type="text" id="askPhoenixInput" placeholder="Ask about this problem…" />
+      <button id="askPhoenixSendBtn">Ask</button>
+    </div>
+  `;
+  renderAskPhoenixThread();
+
+  const input = document.getElementById("askPhoenixInput");
+  document.getElementById("askPhoenixSendBtn").onclick = sendAskPhoenixMessage;
+  input.onkeydown = (e) => { if (e.key === "Enter") sendAskPhoenixMessage(); };
+  input.focus();
+}
+
+function renderAskPhoenixThread() {
+  const thread = document.getElementById("askPhoenixThread");
+  if (!thread) return;
+  if (askPhoenixConversation.length === 0) {
+    thread.innerHTML = `<p class="ask-phoenix-empty">Ask anything about this problem -- how to approach it, what a concept means, or why your in-progress query might be off.</p>`;
+    return;
+  }
+  thread.innerHTML = askPhoenixConversation.map(t => `
     <div class="followup-turn ${t.role}">
-      <div class="who">${t.role === "user" ? "You" : "Explain"}</div>
+      <div class="who">${t.role === "user" ? "You" : "Phoenix"}</div>
       ${escapeHtml(t.content)}
     </div>
   `).join("");
+  thread.scrollTop = thread.scrollHeight;
 }
 
-async function sendFollowup() {
-  const input = document.getElementById("followupInput");
+async function sendAskPhoenixMessage() {
+  const input = document.getElementById("askPhoenixInput");
   const question = input.value.trim();
-  if (!question || !followupState) return;
+  if (!question) return;
 
-  const sendBtn = document.getElementById("followupSendBtn");
+  const sendBtn = document.getElementById("askPhoenixSendBtn");
   sendBtn.disabled = true;
   input.disabled = true;
 
-  followupState.conversation.push({ role: "user", content: question });
-  renderFollowupThread();
+  askPhoenixConversation.push({ role: "user", content: question });
+  renderAskPhoenixThread();
   input.value = "";
 
   try {
-    const res = await api("/api/ask-followup", {
+    const res = await api("/api/ask-phoenix", {
       method: "POST",
       body: JSON.stringify({
         problem_id: currentProblem.id,
-        student_query: followupState.studentQuery,
-        expected_preview: followupState.expectedPreview,
-        actual_preview: followupState.actualPreview,
-        error: followupState.error,
-        conversation: followupState.conversation.slice(0, -1),
+        current_query: monacoEditor ? monacoEditor.getValue() : null,
+        conversation: askPhoenixConversation.slice(0, -1),
         question,
       }),
     });
-    followupState.conversation.push({ role: "assistant", content: res.answer });
-    renderFollowupThread();
+    askPhoenixConversation.push({ role: "assistant", content: res.answer });
+    renderAskPhoenixThread();
   } catch (e) {
-    followupState.conversation.pop(); // remove the question we optimistically added
-    renderFollowupThread();
-    const thread = document.getElementById("followupThread");
+    askPhoenixConversation.pop(); // remove the question we optimistically added
+    renderAskPhoenixThread();
+    const thread = document.getElementById("askPhoenixThread");
     thread.innerHTML += `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
   } finally {
     sendBtn.disabled = false;
     input.disabled = false;
-    refreshTierBadge();
   }
 }
 
@@ -536,16 +543,18 @@ async function init() {
   document.getElementById("accessFilter").onchange = renderProblemList;
   document.getElementById("solvedFilter").onchange = renderProblemList;
 
-  const tutorToggle = document.getElementById("tutorToggle");
-  tutorToggle.checked = getTutorEnabled();
-  tutorToggle.onchange = () => setTutorEnabled(tutorToggle.checked);
-
   document.getElementById("resetProgressBtn").onclick = resetProgress;
 
   const mobileFiltersToggle = document.getElementById("mobileFiltersToggle");
   mobileFiltersToggle.onclick = () => {
     document.getElementById("filtersPanel").classList.toggle("mobile-open");
     mobileFiltersToggle.classList.toggle("open");
+  };
+
+  document.getElementById("askPhoenixFab").onclick = openAskPhoenix;
+  document.getElementById("askPhoenixClose").onclick = closeAskPhoenix;
+  document.getElementById("askPhoenixOverlay").onclick = (e) => {
+    if (e.target.id === "askPhoenixOverlay") closeAskPhoenix();
   };
 
   document.getElementById("brandHome").onclick = showHome;

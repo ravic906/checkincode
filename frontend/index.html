@@ -28,10 +28,6 @@
       <span class="brand-wordmark">Phoenix<span class="brand-accent">Prep</span></span>
     </div>
     <div class="topbar-right">
-      <label class="tutor-toggle" id="tutorToggleWrap">
-        <input type="checkbox" id="tutorToggle" checked />
-        <span>Explain</span>
-      </label>
       <div class="tier-badge" id="tierBadge">loading…</div>
       <button class="reset-progress-btn" id="resetProgressBtn" title="Reset solved-problem progress">Reset Progress</button>
       <div id="authSection" class="auth-section"></div>
@@ -106,9 +102,29 @@
     <main class="workspace" id="workspace">
       <div class="empty-state">
         <h2>Pick a problem to get started</h2>
-        <p>Solve it with real SQL against real (slightly messy) data — every answer is verified by actually running your query in DuckDB. Wrong answers get a plain-language explanation.</p>
+        <p>Solve it with real SQL against real (slightly messy) data — every answer is verified by actually running your query in DuckDB. Stuck? Ask Phoenix for help, any time.</p>
       </div>
     </main>
+  </div>
+
+  <button class="ask-phoenix-fab" id="askPhoenixFab" style="display:none;" type="button">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2 L14 9 L21 12 L14 15 L12 22 L10 15 L3 12 L10 9 Z" fill="white"/>
+    </svg>
+    <span>Ask Phoenix</span>
+  </button>
+
+  <div class="ask-phoenix-overlay" id="askPhoenixOverlay" style="display:none;">
+    <div class="ask-phoenix-panel" id="askPhoenixPanel">
+      <div class="ask-phoenix-header">
+        <div>
+          <div class="ask-phoenix-title">Ask Phoenix</div>
+          <div class="ask-phoenix-subtitle" id="askPhoenixSubtitle"></div>
+        </div>
+        <button class="ask-phoenix-close" id="askPhoenixClose" type="button">✕</button>
+      </div>
+      <div class="ask-phoenix-body" id="askPhoenixBody"></div>
+    </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs/loader.js"></script>

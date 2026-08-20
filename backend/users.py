@@ -71,12 +71,6 @@ def increment_submission(user_id: str):
             cur.execute("UPDATE users SET submissions_today = submissions_today + 1 WHERE id = %s", (user_id,))
 
 
-def increment_explanation(user_id: str):
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE users SET explanations_today = explanations_today + 1 WHERE id = %s", (user_id,))
-
-
 def set_tier(user_id: str, tier: str, email: str | None = None):
     """Upserts so a payment webhook/verify call succeeds even if this is
     the user's very first request (e.g. they signed in on a different
