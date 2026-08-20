@@ -16,10 +16,18 @@ let clerkReady = null; // Promise, resolves once Clerk.load() has finished
 
 function waitForClerk() {
   if (clerkReady) return clerkReady;
-  clerkReady = new Promise((resolve) => {
+  clerkReady = new Promise((resolve, reject) => {
+    let attempts = 0;
     const check = () => {
+      attempts++;
       if (window.Clerk) {
-        window.Clerk.load().then(() => resolve(window.Clerk));
+        console.log("[auth] window.Clerk found after", attempts * 50, "ms, calling load()...");
+        window.Clerk.load()
+          .then(() => { console.log("[auth] Clerk.load() resolved"); resolve(window.Clerk); })
+          .catch((e) => { console.error("[auth] Clerk.load() REJECTED:", e); reject(e); });
+      } else if (attempts > 200) { // 10s
+        console.error("[auth] window.Clerk never appeared after 10s -- script tag likely failed to load/execute");
+        reject(new Error("Clerk script never loaded"));
       } else {
         setTimeout(check, 50);
       }
@@ -64,4 +72,6 @@ function renderAuthSection() {
 waitForClerk().then((Clerk) => {
   renderAuthSection();
   Clerk.addListener(() => renderAuthSection());
+}).catch((e) => {
+  console.error("[auth] Clerk setup failed, sign-in unavailable:", e);
 });
