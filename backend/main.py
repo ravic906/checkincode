@@ -400,6 +400,12 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             "remaining_seconds": 0,
         }
 
+    forced_topic = (
+        interview.next_topic(session, interview.GENERIC_TOPICS)
+        if interview.topic_cap_reached(session)
+        else None
+    )
+
     try:
         result = llm.interview_turn(
             user_id=user_id,
@@ -408,6 +414,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             conversation=session["conversation"],
             current_topic=session["current_topic"],
             topic_turn_count=session["current_topic_turns"],
+            forced_topic=forced_topic,
         )
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a

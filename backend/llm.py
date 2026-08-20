@@ -208,6 +208,7 @@ def _interview_system_prompt(
     current_topic: str | None = None,
     topic_turn_count: int = 0,
     max_turns_per_topic: int = 3,
+    forced_topic: str | None = None,
 ) -> str:
     resume_block = ""
     if resume_text:
@@ -220,14 +221,15 @@ def _interview_system_prompt(
         )
 
     topic_budget_block = ""
-    if current_topic and topic_turn_count >= max_turns_per_topic:
+    if forced_topic:
+        # Cap already reached -- this is not a judgment call, it's a direct
+        # instruction. Leaving it as "decide whether to switch" repeatedly
+        # let the model just keep following up past the limit.
         topic_budget_block = (
-            f"You have already spent {topic_turn_count} question(s) on the "
-            f"current topic ('{current_topic}'), which is the limit "
-            f"({max_turns_per_topic}) for a single topic. Regardless of how "
-            "the candidate just answered, you MUST switch_topic now to a "
-            "topic from the list that hasn't been covered yet -- do not "
-            "follow_up or probe further on this topic.\n\n"
+            f"The topic budget for '{current_topic}' is used up. Do NOT ask "
+            f"anything more about it. Your action MUST be \"switch_topic\" and "
+            f"your topic MUST be exactly \"{forced_topic}\" -- write an "
+            f"opening question for that new topic now.\n\n"
         )
     elif current_topic:
         topic_budget_block = (
@@ -314,18 +316,27 @@ def interview_turn(
     conversation: list[dict],
     current_topic: str | None = None,
     topic_turn_count: int = 0,
+    forced_topic: str | None = None,
 ) -> dict:
     """
     Decides the next interview question. `conversation` is the full turn
     history so far as [{"role": "assistant"|"user", "content": ...}, ...]
     (may be empty for the very first question). `current_topic`/
-    `topic_turn_count` let the prompt enforce a max-turns-per-topic budget
-    so the interviewer can't linger indefinitely on one scenario. Returns:
+    `topic_turn_count` let the prompt enforce a max-turns-per-topic budget.
+    `forced_topic`, when set, means the caller has already decided (based on
+    MAX_TURNS_PER_TOPIC) that the topic MUST switch now -- the model isn't
+    asked to judge that, only to phrase the new topic's opening question;
+    the action/topic in the return value are hard-set to match rather than
+    trusting the model to have echoed them back correctly, since it's been
+    observed to keep returning follow_up past its instructed limit when
+    that decision was left to its judgment. Returns:
         {"action": str, "topic": str, "question": str, "usage": {...}}
     Falls back to a generic switch_topic question if the model's reply isn't
     valid JSON, so a single malformed response doesn't break the interview.
     """
-    messages = [{"role": "system", "content": _interview_system_prompt(topics, resume_text, current_topic, topic_turn_count)}]
+    messages = [{"role": "system", "content": _interview_system_prompt(
+        topics, resume_text, current_topic, topic_turn_count, forced_topic=forced_topic,
+    )}]
     if conversation:
         # Chat APIs only accept {role, content} -- strip our extra "topic" bookkeeping field.
         messages.extend({"role": t["role"], "content": t["content"]} for t in conversation)
@@ -336,8 +347,8 @@ def interview_turn(
     try:
         parsed = _parse_json_reply(result["reply"])
         return {
-            "action": parsed.get("action", "switch_topic"),
-            "topic": parsed.get("topic", topics[0]),
+            "action": "switch_topic" if forced_topic else parsed.get("action", "switch_topic"),
+            "topic": forced_topic or parsed.get("topic", topics[0]),
             "question": parsed["question"],
             "table_context": parsed.get("table_context"),
             "usage": result["usage"],
@@ -345,7 +356,7 @@ def interview_turn(
     except (json.JSONDecodeError, KeyError):
         return {
             "action": "switch_topic",
-            "topic": topics[0],
+            "topic": forced_topic or topics[0],
             "question": result["reply"],
             "table_context": None,
             "usage": result["usage"],

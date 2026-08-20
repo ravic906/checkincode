@@ -47,7 +47,7 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
         "skip_intro": skip_intro,
         "duration_seconds": duration_seconds,
         "started_at": time.time(),
-        "topics_covered": [],  # list of {"topic": str, "depth": int}
+        "topics_covered": [],  # list of topic names that have been asked about
         "conversation": [],  # [{"role": "assistant"|"user", "content": str, "topic": str|None}]
         "current_topic": None,
         "current_topic_turns": 0,
@@ -81,11 +81,34 @@ def record_turn(session: dict, role: str, content: str, topic: str | None = None
 def update_topic_tracking(session: dict, action: str, topic: str):
     """
     Tracks how many consecutive question-turns have been spent on the
-    current topic, so the interview prompt can enforce MAX_TURNS_PER_TOPIC
-    regardless of the model's own judgment.
+    current topic, so callers can enforce MAX_TURNS_PER_TOPIC deterministically
+    rather than relying on the model to police its own turn budget.
     """
     if action == "switch_topic" or session["current_topic"] != topic:
         session["current_topic"] = topic
         session["current_topic_turns"] = 1
+        if topic not in session["topics_covered"]:
+            session["topics_covered"].append(topic)
     else:
         session["current_topic_turns"] += 1
+
+
+def topic_cap_reached(session: dict) -> bool:
+    return session["current_topic_turns"] >= MAX_TURNS_PER_TOPIC
+
+
+def next_topic(session: dict, topics: list[str]) -> str:
+    """
+    Deterministically picks the next topic to force a switch to, once
+    MAX_TURNS_PER_TOPIC is hit -- prefers a topic not yet covered this
+    interview, cycling back through the list if everything's been touched.
+    """
+    uncovered = [t for t in topics if t not in session["topics_covered"]]
+    if uncovered:
+        return uncovered[0]
+    # Everything's been covered at least once -- cycle to the topic after
+    # the current one so we don't just immediately re-pick the same topic.
+    if session["current_topic"] in topics:
+        idx = topics.index(session["current_topic"])
+        return topics[(idx + 1) % len(topics)]
+    return topics[0]
