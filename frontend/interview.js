@@ -1,17 +1,23 @@
 /*
- * Mock voice interview. All speech-to-text and text-to-speech runs in the
- * browser via the Web Speech API -- no audio ever touches the backend, it
- * only ever sees transcribed text in and a spoken question text out. That
- * keeps this swappable later (e.g. to Groq Whisper for STT) without
- * touching the interview orchestration logic on the server.
+ * Mock voice interview. Text-to-speech still runs entirely in the browser
+ * via the Web Speech API. Speech-to-text records the candidate's full
+ * answer with the browser's MediaRecorder API and sends it to
+ * POST /api/interview/stt (Fireworks-hosted Whisper -- see backend/stt.py)
+ * for transcription, rather than using the browser's own (accent-fragile,
+ * inconsistent-across-browsers) SpeechRecognition. Either way, the backend
+ * interview orchestration only ever sees plain text in and out -- swapping
+ * the STT provider again later (e.g. back to Groq Whisper) is a backend
+ * env-var change, not a frontend rewrite.
  */
 
 let interviewState = null; // { sessionId, resumeText, mode, remainingSeconds, timerHandle, transcript: [{role, content, topic}] }
-let recognition = null;
 let isListening = false;
 
-const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-const speechRecognitionSupported = !!SpeechRecognitionCtor;
+// STT now records the full answer and sends it to POST /api/interview/stt
+// (Fireworks-hosted Whisper -- see backend/stt.py) instead of the browser's
+// own Web Speech API, so support is gated on mic-recording APIs rather than
+// SpeechRecognition.
+const micRecordingSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 const speechSynthesisSupported = "speechSynthesis" in window;
 
 function formatTime(totalSeconds) {
@@ -50,6 +56,21 @@ async function uploadResume(file) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
+async function transcribeAudio(blob) {
+  const formData = new FormData();
+  formData.append("file", blob, "answer.webm");
+  const res = await fetch(`${API_BASE}/api/interview/stt`, {
+    method: "POST",
+    headers: { "X-User-Id": USER_ID },
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Transcription failed (${res.status})`);
   }
   return res.json();
 }
@@ -160,7 +181,7 @@ async function renderInterviewSetupScreen() {
         : "20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
       ${monthlyNote}
 
-      ${!speechRecognitionSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
+      ${!micRecordingSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
 
       <div class="setup-card">
         <div class="setup-section-label">Format</div>
@@ -367,8 +388,8 @@ function renderLiveInterview() {
       <div class="table-context-panel" id="tableContextPanel" style="display:none;"></div>
       <div class="interview-transcript" id="interviewTranscript"></div>
       <div class="interview-controls">
-        ${speechRecognitionSupported ? `
-          <button class="mic-btn" id="micBtn"><span class="mic-btn-icon">🎙️</span><span class="mic-btn-text">Unmute to Speak</span></button>
+        ${micRecordingSupported ? `
+          <button class="mic-btn" id="micBtn"><span class="mic-btn-icon">🎙️</span><span class="mic-btn-text">Tap to Speak</span></button>
           <div class="interim-text" id="interimText"></div>
         ` : ""}
         <div class="typed-answer-row">
@@ -384,7 +405,7 @@ function renderLiveInterview() {
 
   document.getElementById("endInterviewBtn").onclick = () => endInterview();
 
-  if (speechRecognitionSupported) {
+  if (micRecordingSupported) {
     document.getElementById("micBtn").onclick = toggleListening;
   }
 
@@ -481,8 +502,10 @@ function speak(text) {
   });
 }
 
-let pendingFinalTranscript = "";
 let skipNextSubmit = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let micStream = null;
 
 function toggleListening() {
   if (isListening) stopListening();
@@ -493,68 +516,83 @@ function setMicUi(state) {
   const micBtn = document.getElementById("micBtn");
   if (!micBtn) return;
   micBtn.classList.toggle("listening", state === "listening");
-  micBtn.querySelector(".mic-btn-icon").textContent = state === "listening" ? "⏺️" : "🎙️";
-  micBtn.querySelector(".mic-btn-text").textContent = state === "listening" ? "Listening… Tap to Mute" : "Unmute to Speak";
+  micBtn.classList.toggle("transcribing", state === "transcribing");
+  micBtn.disabled = state === "transcribing";
+  const icon = state === "listening" ? "⏺️" : state === "transcribing" ? "⏳" : "🎙️";
+  const text = state === "listening" ? "Recording… Tap to Stop"
+    : state === "transcribing" ? "Transcribing…"
+    : "Tap to Speak";
+  micBtn.querySelector(".mic-btn-icon").textContent = icon;
+  micBtn.querySelector(".mic-btn-text").textContent = text;
 }
 
-const RECOGNITION_ERROR_MESSAGES = {
-  "not-allowed": "Microphone access was blocked. Check your browser's site settings and allow the microphone, then try again.",
-  "no-speech": "Didn't catch any speech. Try again, and speak right after unmuting.",
-  "audio-capture": "No microphone found. Check that one is connected and not in use by another app.",
-  "network": "A network error interrupted speech recognition. Try again.",
-  "language-not-supported": "This browser doesn't support English speech recognition. Try typing your answer instead.",
-  "service-not-allowed": "Speech recognition service was blocked. Try typing your answer instead.",
+const MIC_ERROR_MESSAGES = {
+  NotAllowedError: "Microphone access was blocked. Check your browser's site settings and allow the microphone, then try again.",
+  PermissionDeniedError: "Microphone access was blocked. Check your browser's site settings and allow the microphone, then try again.",
+  NotFoundError: "No microphone found. Check that one is connected and not in use by another app.",
+  NotReadableError: "Couldn't access the microphone -- it may be in use by another app.",
+  SecurityError: "Microphone access requires a secure connection (https).",
 };
 
-function startListening() {
-  if (!speechRecognitionSupported || isListening) return;
-  recognition = new SpeechRecognitionCtor();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = "en-US";
-
-  pendingFinalTranscript = "";
-  skipNextSubmit = false;
-  let lastError = null;
+async function startListening() {
+  if (!micRecordingSupported || isListening) return;
   const interimEl = document.getElementById("interimText");
+  if (interimEl) interimEl.textContent = "";
 
-  recognition.onresult = (event) => {
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const chunk = event.results[i][0].transcript;
-      if (event.results[i].isFinal) pendingFinalTranscript += chunk + " ";
-      else interim += chunk;
-    }
-    if (interimEl) interimEl.textContent = pendingFinalTranscript + interim;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    const msg = MIC_ERROR_MESSAGES[err.name] || `Couldn't access the microphone (${err.name}). Try typing your answer instead.`;
+    if (interimEl) interimEl.textContent = msg;
+    return;
+  }
+
+  recordedChunks = [];
+  const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+  mediaRecorder = mimeType ? new MediaRecorder(micStream, { mimeType }) : new MediaRecorder(micStream);
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) recordedChunks.push(event.data);
   };
 
-  recognition.onend = () => {
+  mediaRecorder.onstop = async () => {
+    micStream.getTracks().forEach((track) => track.stop());
+    micStream = null;
     isListening = false;
-    setMicUi("muted");
-    const text = pendingFinalTranscript.trim();
-    if (lastError) {
-      if (interimEl) interimEl.textContent = lastError;
-    } else {
-      if (interimEl) interimEl.textContent = "";
-      if (text && !skipNextSubmit) submitAnswer(text);
+
+    if (skipNextSubmit) {
+      skipNextSubmit = false;
+      setMicUi("idle");
+      return;
     }
-    skipNextSubmit = false;
+    if (!recordedChunks.length) {
+      setMicUi("idle");
+      return;
+    }
+
+    setMicUi("transcribing");
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    try {
+      const { text } = await transcribeAudio(blob);
+      setMicUi("idle");
+      const trimmed = (text || "").trim();
+      if (trimmed) submitAnswer(trimmed);
+      else if (interimEl) interimEl.textContent = "Didn't catch any speech. Try again.";
+    } catch (err) {
+      setMicUi("idle");
+      if (interimEl) interimEl.textContent = err.message || "Transcription failed. Try again.";
+    }
   };
 
-  recognition.onerror = (event) => {
-    isListening = false;
-    lastError = RECOGNITION_ERROR_MESSAGES[event.error] || `Speech recognition error: ${event.error}. Try typing your answer instead.`;
-    setMicUi("muted");
-  };
-
+  skipNextSubmit = false;
   isListening = true;
   setMicUi("listening");
-  recognition.start();
+  mediaRecorder.start();
 }
 
 function stopListening(opts = {}) {
   if (opts.skipSubmit) skipNextSubmit = true;
-  if (recognition && isListening) recognition.stop();
+  if (mediaRecorder && isListening) mediaRecorder.stop();
 }
 
 async function submitAnswer(answerText) {
@@ -598,7 +636,7 @@ async function endInterview() {
   if (!interviewState) return;
   if (interviewState.timerHandle) clearInterval(interviewState.timerHandle);
   window.speechSynthesis?.cancel();
-  if (recognition && isListening) recognition.stop();
+  stopListening({ skipSubmit: true });
 
   const screen = document.getElementById("interviewScreen");
   screen.innerHTML = `<div class="loading-dots">Generating your feedback report…</div>`;
@@ -694,6 +732,6 @@ window.stopInterviewAudio = () => {
   window.speechSynthesis?.cancel();
   clearInterval(speechKeepAliveTimer);
   currentUtterance = null;
-  if (recognition && isListening) recognition.stop();
+  stopListening({ skipSubmit: true });
   if (interviewState && interviewState.timerHandle) clearInterval(interviewState.timerHandle);
 };
