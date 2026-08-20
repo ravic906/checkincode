@@ -647,3 +647,19 @@ def api_admin_reject(problem_id: str, x_admin_token: str = Header(default=None))
 def api_admin_cadence(x_admin_token: str = Header(default=None)):
     _require_admin(x_admin_token)
     return {"last_batch_generated_at": problems_module.get_last_batch_generated_at()}
+
+
+class SetTierRequest(BaseModel):
+    user_id: str
+    tier: str
+
+
+@app.post("/api/admin/set-tier")
+def api_admin_set_tier(req: SetTierRequest, x_admin_token: str = Header(default=None)):
+    """Manually flips a user's tier -- for testing, and for handling a
+    refund/dispute by hand later since there's no self-serve downgrade."""
+    _require_admin(x_admin_token)
+    if req.tier not in ("free", "paid"):
+        raise HTTPException(400, "tier must be 'free' or 'paid'")
+    users_module.set_tier(req.user_id, req.tier)
+    return {"user_id": req.user_id, "tier": req.tier}
