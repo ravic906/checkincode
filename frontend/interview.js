@@ -46,7 +46,7 @@ async function uploadResume(file) {
 
 async function renderInterviewEntry() {
   const existingId = getActiveSessionId();
-  if (!existingId) { renderInterviewSetup(); return; }
+  if (!existingId) { renderInterviewSetupScreen(); return; }
 
   const screen = document.getElementById("interviewScreen");
   screen.innerHTML = `<div class="loading-dots">Checking for an interview in progress…</div>`;
@@ -55,14 +55,14 @@ async function renderInterviewEntry() {
     const res = await api(`/api/interview/session/${existingId}`);
     if (res.ended || res.time_up) {
       clearActiveSessionId();
-      renderInterviewSetup();
+      renderInterviewSetupScreen();
       return;
     }
     renderResumePrompt(res);
   } catch (err) {
     // Session not found (expired, wrong user, etc.) -- nothing to resume.
     clearActiveSessionId();
-    renderInterviewSetup();
+    renderInterviewSetupScreen();
   }
 }
 
@@ -82,7 +82,7 @@ function renderResumePrompt(sessionState) {
   document.getElementById("resumeBtn").onclick = () => resumeInterview(sessionState);
   document.getElementById("discardBtn").onclick = () => {
     clearActiveSessionId();
-    renderInterviewSetup();
+    renderInterviewSetupScreen();
   };
 }
 
@@ -106,7 +106,7 @@ function resumeInterview(sessionState) {
   // the question is right there in the transcript to read.
 }
 
-function renderInterviewSetup() {
+function renderInterviewSetupScreen() {
   const screen = document.getElementById("interviewScreen");
   screen.innerHTML = `
     <div class="interview-setup">
