@@ -19,22 +19,16 @@ import time
 import uuid
 
 import db
+import topics
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
 MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 
-GENERIC_TOPICS = [
-    "SELECT / WHERE filtering basics",
-    "JOINs (inner, left, self-join)",
-    "Aggregation and GROUP BY / HAVING",
-    "Subqueries and CTEs",
-    "Window functions",
-    "NULL handling semantics",
-    "Indexing and query performance",
-    "Normalization and schema design",
-    "Transactions and ACID properties",
-]
+# The interview can talk about every topic, including DML -- it's purely
+# conversational, nothing gets executed, so the sandbox's read-only
+# invariant (see topics.py, sandbox.py) doesn't apply here.
+GENERIC_TOPICS = topics.ALL_TOPICS
 
 
 def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS) -> dict:

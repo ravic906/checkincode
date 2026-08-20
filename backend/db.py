@@ -71,6 +71,34 @@ def init_schema():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS problems (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    difficulty TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    tags JSONB NOT NULL DEFAULT '[]',
+                    description TEXT NOT NULL,
+                    schema_sql TEXT NOT NULL,
+                    seed_sql TEXT NOT NULL,
+                    canonical_sql TEXT NOT NULL,
+                    order_matters BOOLEAN NOT NULL DEFAULT FALSE,
+                    status TEXT NOT NULL DEFAULT 'live',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS content_cadence (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    last_batch_generated_at TIMESTAMPTZ,
+                    CONSTRAINT single_row CHECK (id = 1)
+                )
+            """)
+            cur.execute("""
+                INSERT INTO content_cadence (id, last_batch_generated_at)
+                VALUES (1, NULL)
+                ON CONFLICT (id) DO NOTHING
+            """)
 
 
 def dict_cursor(conn):

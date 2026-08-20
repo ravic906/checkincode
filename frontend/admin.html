@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Phoenix Prep — Admin: Problem Review</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { padding: 24px; max-width: 900px; margin: 0 auto; }
+  .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .token-row { display: flex; gap: 8px; margin-bottom: 24px; }
+  .token-row input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .draft-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .draft-card h3 { margin: 0 0 6px 0; font-size: 15px; }
+  .draft-meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .draft-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .draft-actions button { border: none; border-radius: 6px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .approve-btn { background: var(--green); color: #0f1115; }
+  .reject-btn { background: var(--red); color: white; }
+  .cadence-note { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+</style>
+</head>
+<body>
+  <div class="admin-header">
+    <h1>Problem Review</h1>
+    <button class="run-btn" id="generateBtn">Generate New Batch</button>
+  </div>
+
+  <div class="token-row">
+    <input type="password" id="adminToken" placeholder="Admin token" />
+    <button class="submit-btn" id="loadBtn">Load Pending</button>
+  </div>
+
+  <div class="cadence-note" id="cadenceNote"></div>
+  <div id="pendingList"></div>
+
+  <script src="config.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

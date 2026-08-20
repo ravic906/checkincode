@@ -23,9 +23,28 @@ services:
         fromDatabase:
           name: sql-practice-db
           property: connectionString
+      - key: ADMIN_TOKEN
+        sync: false
 
   - type: web
     name: sql-practice-frontend
     runtime: static
     buildCommand: ""
     staticPublishPath: frontend
+
+  # Runs weekly (cron can't express "every 45 days" directly); the script
+  # itself checks content_cadence.last_batch_generated_at and only
+  # actually triggers a new problem batch once >=45 days have elapsed.
+  - type: cron
+    name: sql-practice-content-cadence
+    runtime: python
+    plan: free
+    rootDir: backend
+    schedule: "0 3 * * 1"
+    buildCommand: pip install --prefer-binary -r requirements.txt
+    startCommand: python cron_check_cadence.py
+    envVars:
+      - key: BACKEND_URL
+        value: https://sql-practice-backend-6bpi.onrender.com
+      - key: ADMIN_TOKEN
+        sync: false

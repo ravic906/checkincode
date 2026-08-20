@@ -29,13 +29,8 @@
       </button>
       <button class="track-card" id="trackInterview">
         <div class="track-icon">🎤</div>
-        <div class="track-title">Mock Interview <span class="pro-badge">PRO</span></div>
+        <div class="track-title">Mock Interview <span class="pro-badge">PRO</span> <span class="pro-badge beta-badge">BETA</span></div>
         <div class="track-desc">45-min spoken SQL interview with an adaptive AI interviewer.</div>
-      </button>
-      <button class="track-card disabled" id="trackPython" disabled>
-        <div class="track-icon">🐍</div>
-        <div class="track-title">Python</div>
-        <div class="track-desc">Coming soon.</div>
       </button>
     </div>
   </section>
@@ -53,6 +48,9 @@
         </select>
         <select id="tagFilter">
           <option value="">All tags</option>
+        </select>
+        <select id="topicFilter">
+          <option value="">All topics</option>
         </select>
       </div>
       <ul class="problem-list" id="problemList"></ul>

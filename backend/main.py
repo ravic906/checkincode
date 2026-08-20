@@ -19,6 +19,7 @@ auth system before launch):
 """
 
 import datetime
+import os
 import uuid
 from collections import defaultdict
 
@@ -28,12 +29,14 @@ from pydantic import BaseModel
 
 import duckdb
 
-from problems import PROBLEMS, get_problem, list_problems_summary
+import problems as problems_module
+from problems import get_problem, list_problems_summary
 import sandbox
 import llm
 import interview
 import resume_parser
 import db
+import topics
 
 app = FastAPI(title="SQL Practice MVP")
 
@@ -46,6 +49,7 @@ app.add_middleware(
 
 FREE_DAILY_SUBMISSIONS = 20
 FREE_DAILY_EXPLANATIONS = 3
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 # user_id -> {"tier": "free"|"paid", "date": "YYYY-MM-DD", "submissions": int, "explanations": int}
 _USAGE = defaultdict(lambda: {"tier": "free", "date": None, "submissions": 0, "explanations": 0})
@@ -56,16 +60,13 @@ _EXPECTED_CACHE = {}
 
 
 @app.on_event("startup")
-def _warm_expected_cache():
-    for p in PROBLEMS:
-        cols, rows, _ = sandbox.compute_expected_output(p)
-        _EXPECTED_CACHE[p["id"]] = (cols, rows)
-
-
-@app.on_event("startup")
-def _init_interview_db():
+def _startup():
     if db.DATABASE_URL:
         db.init_schema()
+        problems_module.seed_if_empty()
+        for p in problems_module.list_all_live_problems():
+            cols, rows, _ = sandbox.compute_expected_output(p)
+            _EXPECTED_CACHE[p["id"]] = (cols, rows)
 
 
 def _today():
@@ -115,13 +116,8 @@ class InterviewEndRequest(BaseModel):
 
 
 @app.get("/api/problems")
-def api_list_problems(difficulty: str | None = None, tag: str | None = None):
-    problems = list_problems_summary()
-    if difficulty:
-        problems = [p for p in problems if p["difficulty"] == difficulty]
-    if tag:
-        problems = [p for p in problems if tag in p["tags"]]
-    return {"problems": problems}
+def api_list_problems(difficulty: str | None = None, tag: str | None = None, topic: str | None = None):
+    return {"problems": list_problems_summary(difficulty=difficulty, tag=tag, topic=topic)}
 
 
 @app.get("/api/problems/{problem_id}")
@@ -150,6 +146,7 @@ def api_get_problem(problem_id: str):
         "id": p["id"],
         "title": p["title"],
         "difficulty": p["difficulty"],
+        "topic": p["topic"],
         "tags": p["tags"],
         "description": p["description"],
         "schema_sql": p["schema_sql"].strip(),
@@ -495,3 +492,77 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
 
     interview.mark_ended(session, feedback)
     return {"feedback": feedback, "conversation": session["conversation"]}
+
+
+class GenerateBatchRequest(BaseModel):
+    count: int = 5
+    topics: list[str] | None = None  # defaults to all gradeable topics if omitted
+
+
+def _require_admin(x_admin_token: str | None):
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "Invalid or missing admin token.")
+
+
+@app.post("/api/admin/problems/generate-batch")
+def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Header(default=None)):
+    """
+    Drafts a new batch of practice problems via the LLM and stores the
+    ones that pass validation as pending_review -- nothing here ever goes
+    live without a human approving it via /approve below. This is what the
+    weekly cron job (render.yaml) calls once 45 days have elapsed since
+    the last batch; it's also callable by hand for an out-of-cycle batch.
+    """
+    _require_admin(x_admin_token)
+    target_topics = req.topics or topics.GRADEABLE_TOPICS
+
+    try:
+        result = llm.generate_problem_batch(user_id="admin", topics=target_topics, count=req.count)
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't generate problems right now ({e}).")
+
+    inserted, skipped = [], []
+    for draft in result["problems"]:
+        try:
+            problem_id = problems_module.insert_pending_draft(draft)
+            inserted.append(problem_id)
+        except problems_module.InvalidDraftProblem as e:
+            skipped.append({"title": draft.get("title", "<untitled>"), "reason": str(e)})
+
+    problems_module.mark_batch_generated()
+    return {"inserted": inserted, "skipped": skipped, "usage": result["usage"]}
+
+
+@app.get("/api/admin/problems/pending")
+def api_admin_list_pending(x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    return {"problems": problems_module.list_pending_problems()}
+
+
+@app.post("/api/admin/problems/{problem_id}/approve")
+def api_admin_approve(problem_id: str, x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    ok = problems_module.approve_problem(problem_id)
+    if not ok:
+        raise HTTPException(404, "Pending problem not found.")
+    # Warm this problem's expected-output cache immediately -- otherwise
+    # the first submission against it would KeyError until next restart.
+    approved = problems_module.get_problem(problem_id)
+    cols, rows, _ = sandbox.compute_expected_output(approved)
+    _EXPECTED_CACHE[problem_id] = (cols, rows)
+    return {"id": problem_id, "status": "live"}
+
+
+@app.post("/api/admin/problems/{problem_id}/reject")
+def api_admin_reject(problem_id: str, x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    ok = problems_module.reject_problem(problem_id)
+    if not ok:
+        raise HTTPException(404, "Pending problem not found.")
+    return {"id": problem_id, "status": "rejected"}
+
+
+@app.get("/api/admin/cadence")
+def api_admin_cadence(x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    return {"last_batch_generated_at": problems_module.get_last_batch_generated_at()}
