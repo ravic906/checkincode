@@ -70,6 +70,20 @@ body {
   cursor: pointer;
 }
 
+.auth-section { display: flex; align-items: center; }
+.signin-btn {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.signin-btn:hover { border-color: var(--accent); }
+
 .layout {
   flex: 1;
   display: flex;
