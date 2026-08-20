@@ -2323,10 +2323,19 @@ def seed_if_empty():
 # which problems are free stays stable and intentional as the bank grows
 # toward 150 -- add to this set by hand if/when more free slots are wanted.
 FREE_PROBLEM_IDS = {
-    "easy-1-filter-active-employees",       # Retrieving Records, easy
-    "easy-4-email-domains",                 # Working with Strings, easy
-    "medium-1-customers-without-orders",    # Working with Multiple Tables, medium
-    "hard-3-rank-salary-in-department",     # Reporting and Warehousing, hard (window functions)
+    # Easy (5)
+    "easy-1-filter-active-employees",       # Retrieving Records
+    "easy-4-email-domains",                 # Working with Strings
+    "easy-11-pagination-limit-offset",      # Sorting Query Results
+    "easy-14-numbers-absolute-delta",       # Working with Numbers
+    "easy-17-ranges-age-groups",            # Working with Ranges
+    # Medium (3)
+    "medium-1-customers-without-orders",    # Working with Multiple Tables
+    "medium-22-string-full-name-concat",    # Working with Strings
+    "medium-30-ranges-grade-bands",         # Working with Ranges
+    # Hard (2)
+    "hard-3-rank-salary-in-department",     # Reporting and Warehousing (window functions)
+    "hard-1-above-dept-average",            # Advanced Searching (correlated subquery)
 }
 
 
