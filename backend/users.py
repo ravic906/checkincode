@@ -23,6 +23,7 @@ def _row_to_usage(row: dict) -> dict:
         "tier": row["tier"],
         "submissions": row["submissions_today"],
         "explanations": row["explanations_today"],
+        "interview_trial_used": row["interview_trial_used"],
     }
 
 
@@ -69,6 +70,12 @@ def increment_submission(user_id: str):
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE users SET submissions_today = submissions_today + 1 WHERE id = %s", (user_id,))
+
+
+def mark_interview_trial_used(user_id: str):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET interview_trial_used = TRUE WHERE id = %s", (user_id,))
 
 
 def set_tier(user_id: str, tier: str, email: str | None = None):

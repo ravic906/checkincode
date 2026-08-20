@@ -116,13 +116,28 @@ function resumeInterview(sessionState) {
   // the question is right there in the transcript to read.
 }
 
-function renderInterviewSetupScreen() {
+async function renderInterviewSetupScreen() {
+  // Free-tier users get one 10-minute trial interview before the 402 wall
+  // -- fetch usage fresh so the setup screen can adapt its copy/duration
+  // control before they even try to start (rather than only reacting to
+  // the 402 after the fact).
+  let usage = null;
+  try {
+    usage = await api("/api/usage");
+  } catch (e) {
+    // Fall through with usage=null -- worst case the screen shows the
+    // normal Pro copy and the real gate still applies server-side on submit.
+  }
+  const isTrialEligible = usage && usage.tier !== "paid" && !usage.interview_trial_used;
+
   const screen = document.getElementById("interviewScreen");
   screen.innerHTML = `
     <div class="interview-setup">
-      <div class="interview-eyebrow">Pro · Voice Interview</div>
+      <div class="interview-eyebrow">${isTrialEligible ? "Free Trial · 10 min" : "Pro · Voice Interview"}</div>
       <h1>Mock SQL Interview</h1>
-      <p class="home-sub">20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered.</p>
+      <p class="home-sub">${isTrialEligible
+        ? "Try one free 10-minute mock interview. Upgrade to Pro for the full 20-45 minute experience."
+        : "20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
 
       ${!speechRecognitionSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
 
@@ -154,9 +169,9 @@ function renderInterviewSetupScreen() {
         <div class="setup-row">
           <div class="duration-row-label">
             <span class="setup-section-label">Duration</span>
-            <span class="duration-value" id="durationValue">45 min</span>
+            <span class="duration-value" id="durationValue">${isTrialEligible ? "10 min (trial)" : "45 min"}</span>
           </div>
-          <input type="range" id="durationSlider" class="duration-slider" min="20" max="45" step="5" value="45" />
+          <input type="range" id="durationSlider" class="duration-slider" min="20" max="45" step="5" value="45" ${isTrialEligible ? "disabled" : ""} />
         </div>
 
         <label class="toggle-row">

@@ -168,6 +168,7 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "tier": u["tier"],
         "submissions_today": u["submissions"],
         "free_daily_submissions": FREE_DAILY_SUBMISSIONS,
+        "interview_trial_used": u["interview_trial_used"],
     }
 
 
@@ -337,14 +338,23 @@ INTRO_QUESTION = (
 )
 
 
-def _require_paid(u: dict):
-    if u["tier"] != "paid":
-        raise HTTPException(
-            402,
-            "Mock interviews are a Pro feature (₹199/mo) -- the interview "
-            "calls the AI continuously for up to 45 minutes, which costs a "
-            "lot more than an occasional Ask Phoenix question.",
-        )
+FREE_TRIAL_DURATION_SECONDS = 10 * 60
+
+
+def _require_paid_or_trial(u: dict) -> bool:
+    """Returns True if this request is consuming the user's free interview
+    trial (caller must then mark it used and cap the session's duration);
+    False if they're paid (no trial needed); raises 402 if neither paid nor
+    trial-eligible."""
+    if u["tier"] == "paid":
+        return False
+    if not u["interview_trial_used"]:
+        return True
+    raise HTTPException(
+        402,
+        "You've used your free interview trial. Upgrade to Pro (₹199/mo) "
+        "for unlimited mock interviews.",
+    )
 
 
 MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB -- a resume has no business being bigger
@@ -354,7 +364,7 @@ MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB -- a resume has no business be
 async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid(u)
+    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
 
     file_bytes = await file.read(MAX_RESUME_UPLOAD_BYTES + 1)
     if len(file_bytes) > MAX_RESUME_UPLOAD_BYTES:
@@ -370,7 +380,7 @@ async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header
 def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid(u)
+    is_trial = _require_paid_or_trial(u)
 
     if req.mode not in ("personalized", "generic"):
         raise HTTPException(400, "mode must be 'personalized' or 'generic'")
@@ -383,7 +393,13 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         resume_text=req.resume_text,
         skip_intro=req.skip_intro,
         duration_seconds=req.duration_minutes * 60,
+        is_trial=is_trial,
     )
+    if is_trial:
+        # Mark the trial used now, at session creation, not at completion --
+        # otherwise an abandoned-and-restarted interview would let a free
+        # user get multiple trials for the cost of one.
+        users_module.mark_interview_trial_used(user_id)
 
     if req.skip_intro:
         try:
@@ -418,7 +434,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
 def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid(u)
+    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
 
     session = interview.get_session(req.session_id)
     if not session or session["user_id"] != user_id:

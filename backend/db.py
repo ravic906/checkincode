@@ -68,8 +68,14 @@ def init_schema():
                     last_table_context JSONB,
                     ended BOOLEAN NOT NULL DEFAULT FALSE,
                     feedback JSONB,
+                    persona TEXT NOT NULL DEFAULT 'neutral',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
+            """)
+            # Migration: `interview_sessions` already existed in prod before
+            # persona was added.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS persona TEXT NOT NULL DEFAULT 'neutral'
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
@@ -128,8 +134,14 @@ def init_schema():
                     usage_date DATE,
                     submissions_today INTEGER NOT NULL DEFAULT 0,
                     explanations_today INTEGER NOT NULL DEFAULT 0,
+                    interview_trial_used BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
+            """)
+            # Migration: `users` already existed in prod before
+            # interview_trial_used was added.
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS interview_trial_used BOOLEAN NOT NULL DEFAULT FALSE
             """)
 
 

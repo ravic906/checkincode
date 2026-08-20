@@ -23,6 +23,7 @@ import topics
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
 MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
+TRIAL_DURATION_SECONDS = 10 * 60  # fixed length for a free-tier trial interview, below the paid 20-45 min range
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 
 # The interview can talk about every topic, including DML -- it's purely
@@ -31,8 +32,13 @@ MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a
 GENERIC_TOPICS = topics.ALL_TOPICS
 
 
-def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS) -> dict:
-    duration_seconds = max(MIN_INTERVIEW_DURATION_SECONDS, min(INTERVIEW_DURATION_SECONDS, duration_seconds))
+def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False) -> dict:
+    if is_trial:
+        # A separate branch, not a lowered floor -- so a paid user's
+        # request can never accidentally slide under the real 20 min floor.
+        duration_seconds = TRIAL_DURATION_SECONDS
+    else:
+        duration_seconds = max(MIN_INTERVIEW_DURATION_SECONDS, min(INTERVIEW_DURATION_SECONDS, duration_seconds))
     session = {
         "session_id": str(uuid.uuid4()),
         "user_id": user_id,
