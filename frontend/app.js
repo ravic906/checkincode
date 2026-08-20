@@ -173,6 +173,26 @@ function pillClass(difficulty) {
   return `pill ${difficulty}`;
 }
 
+let activeTopicFilter = null; // set via filterProblemsByTopic(), e.g. from a weak-topic pill on the interview feedback screen
+
+function renderTopicFilterBanner() {
+  const banner = document.getElementById("topicFilterBanner");
+  if (!activeTopicFilter) { banner.style.display = "none"; return; }
+  banner.style.display = "flex";
+  banner.innerHTML = `<span>Filtered: ${escapeHtml(activeTopicFilter)}</span><button id="clearTopicFilterBtn">Clear ✕</button>`;
+  document.getElementById("clearTopicFilterBtn").onclick = () => {
+    activeTopicFilter = null;
+    renderProblemList();
+  };
+}
+
+function filterProblemsByTopic(topicName) {
+  activeTopicFilter = topicName;
+  showSqlTrack();
+  renderProblemList();
+}
+window.filterProblemsByTopic = filterProblemsByTopic;
+
 function renderProblemList() {
   const diff = document.getElementById("difficultyFilter").value;
   const tag = document.getElementById("tagFilter").value;
@@ -180,12 +200,14 @@ function renderProblemList() {
   const solved = document.getElementById("solvedFilter").value;
   const list = document.getElementById("problemList");
   list.innerHTML = "";
+  renderTopicFilterBanner();
 
   const filtered = allProblems.filter(p =>
     (!diff || p.difficulty === diff)
     && (!tag || p.tags.includes(tag))
     && (!access || (access === "free" ? p.is_free : !p.is_free))
     && (!solved || (solved === "solved" ? p.solved : !p.solved))
+    && (!activeTopicFilter || p.topic === activeTopicFilter)
   );
 
   for (const p of filtered) {

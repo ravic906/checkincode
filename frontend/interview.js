@@ -588,7 +588,7 @@ async function endInterview() {
       body: JSON.stringify({ session_id: interviewState.sessionId }),
     });
     clearActiveSessionId();
-    renderFeedback(res.feedback);
+    await renderFeedback(res.feedback);
   } catch (err) {
     screen.innerHTML = `<div class="feedback-report">
       <div class="result-banner fail">Couldn't generate feedback: ${escapeHtml(err.message)}</div>
@@ -605,16 +605,42 @@ const LEVEL_META = {
   advanced: { icon: "●", label: "Advanced" },
 };
 
-function renderFeedback(report) {
+let gradeableTopicsPromise = null;
+function loadGradeableTopics() {
+  // Lazy + cached -- only the feedback screen needs this, and it never
+  // changes within a session.
+  if (!gradeableTopicsPromise) {
+    gradeableTopicsPromise = api("/api/topics").then(r => new Set(r.gradeable)).catch(() => new Set());
+  }
+  return gradeableTopicsPromise;
+}
+
+async function renderFeedback(report) {
   const screen = document.getElementById("interviewScreen");
   const level = LEVEL_META[report.rough_level] || LEVEL_META.intermediate;
+  const gradeableTopics = await loadGradeableTopics();
+
+  const scoreHtml = typeof report.score === "number"
+    ? `<div class="feedback-score">${report.score}<span>/100</span></div>`
+    : "";
+
+  const pillsHtml = (report.topics_to_study || []).map(t => {
+    if (gradeableTopics.has(t)) {
+      return `<button class="topic-pill topic-pill-link" data-topic="${escapeHtml(t)}">${escapeHtml(t)} →</button>`;
+    }
+    return `<span class="topic-pill topic-pill-inert" title="No practice problems for this topic yet -- ask about it via Ask Phoenix from any practice problem.">${escapeHtml(t)}</span>`;
+  }).join("") || "—";
+
   screen.innerHTML = `
     <div class="feedback-report">
       <div class="interview-eyebrow">Interview Complete</div>
       <div class="feedback-header">
         <h1>Your Feedback</h1>
-        <div class="feedback-level-badge">
-          <span class="feedback-level-icon">${level.icon}</span>${escapeHtml(level.label)}
+        <div class="feedback-header-badges">
+          ${scoreHtml}
+          <div class="feedback-level-badge">
+            <span class="feedback-level-icon">${level.icon}</span>${escapeHtml(level.label)}
+          </div>
         </div>
       </div>
       <p class="feedback-summary">${escapeHtml(report.overall_summary || "")}</p>
@@ -631,12 +657,15 @@ function renderFeedback(report) {
       </div>
 
       <h3 class="feedback-section-title">Topics to Study</h3>
-      <div class="topic-pills">${(report.topics_to_study || []).map(t => `<span class="topic-pill">${escapeHtml(t)}</span>`).join("") || "—"}</div>
+      <div class="topic-pills">${pillsHtml}</div>
 
       <button class="submit-btn" id="backHomeBtn">Back to home</button>
     </div>
   `;
   document.getElementById("backHomeBtn").onclick = showHome;
+  document.querySelectorAll(".topic-pill-link").forEach(btn => {
+    btn.onclick = () => window.filterProblemsByTopic(btn.dataset.topic);
+  });
 }
 
 window.renderInterviewSetup = renderInterviewEntry;

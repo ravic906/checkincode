@@ -100,6 +100,15 @@ class InterviewEndRequest(BaseModel):
     session_id: str
 
 
+@app.get("/api/topics")
+def api_topics():
+    """Exposes the topic taxonomy so the frontend doesn't have to hand-
+    duplicate topics.py's lists as a drift-prone JS array -- used to decide
+    which interview-feedback "topics to study" pills can link into the
+    practice bank (only GRADEABLE_TOPICS have matching problems)."""
+    return {"gradeable": topics.GRADEABLE_TOPICS, "all": topics.ALL_TOPICS}
+
+
 @app.get("/api/problems")
 def api_list_problems(
     difficulty: str | None = None,

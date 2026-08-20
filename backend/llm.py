@@ -19,6 +19,8 @@ from pathlib import Path
 
 import requests
 
+import topics
+
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-20b")
@@ -377,10 +379,13 @@ FEEDBACK_SYSTEM_PROMPT = (
     "You are an experienced SQL interviewer writing a feedback report after "
     "a mock interview. Review the full transcript and produce a structured, "
     "honest but encouraging assessment for the candidate.\n\n"
+    f"topics_to_study MUST only contain values from this exact list (use "
+    f"the exact spelling): {', '.join(topics.ALL_TOPICS)}.\n\n"
     "Respond with ONLY a JSON object, no other text, no markdown code "
     'fences: {"overall_summary": "<2-3 sentence overall impression>", '
+    '"score": <integer 0-100, your holistic assessment of interview performance>, '
     '"strengths": ["<point>", ...], "weaknesses": ["<point>", ...], '
-    '"topics_to_study": ["<topic>", ...], '
+    '"topics_to_study": ["<topic, from the list above>", ...], '
     '"rough_level": "beginner"|"intermediate"|"advanced"}'
 )
 
@@ -401,6 +406,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
     except json.JSONDecodeError:
         report = {
             "overall_summary": result["reply"],
+            "score": None,
             "strengths": [],
             "weaknesses": [],
             "topics_to_study": [],

@@ -138,6 +138,26 @@ body {
   font-size: 12px;
 }
 
+.topic-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(79, 140, 255, 0.08);
+  border-bottom: 1px solid rgba(79, 140, 255, 0.25);
+  font-size: 12px;
+  color: var(--accent);
+}
+.topic-filter-banner button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.topic-filter-banner button:hover { color: var(--text); }
+
 .problem-list {
   list-style: none;
   margin: 0;
@@ -1094,6 +1114,20 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 }
 .feedback-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .feedback-report h1 { margin: 0; font-size: 28px; text-wrap: balance; }
+.feedback-header-badges { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.feedback-score {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--studio-panel-2);
+  border: 1px solid var(--studio-border);
+  padding: 5px 14px;
+  border-radius: 999px;
+}
+.feedback-score span { font-size: 11px; font-weight: 600; color: var(--muted); }
 .feedback-level-badge {
   display: flex;
   align-items: center;
@@ -1149,6 +1183,16 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   background: rgba(240,184,110,0.1);
   border: 1px solid rgba(240,184,110,0.28);
   color: var(--gold);
+  font-family: inherit;
+}
+.topic-pill-link { cursor: pointer; transition: transform 0.15s, background 0.15s; }
+.topic-pill-link:hover { background: rgba(240,184,110,0.2); transform: translateY(-1px); }
+.topic-pill-inert {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+  border-color: var(--studio-border);
 }
 .feedback-report .submit-btn {
   margin-top: 28px;
