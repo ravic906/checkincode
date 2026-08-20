@@ -53,6 +53,7 @@ function showHome() {
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "none";
   document.getElementById("tutorToggleWrap").style.display = "none";
+  document.getElementById("resetProgressBtn").style.display = "none";
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
@@ -60,12 +61,14 @@ function showSqlTrack() {
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
   document.getElementById("tutorToggleWrap").style.display = "flex";
+  document.getElementById("resetProgressBtn").style.display = "inline-block";
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "flex";
   document.getElementById("tutorToggleWrap").style.display = "none";
+  document.getElementById("resetProgressBtn").style.display = "none";
 }
 
 async function refreshTierBadge() {
@@ -73,7 +76,7 @@ async function refreshTierBadge() {
   const badge = document.getElementById("tierBadge");
   badge.classList.toggle("paid", usage.tier === "paid");
   if (usage.tier === "paid") {
-    badge.innerHTML = `Pro — full problem library, unlimited AI explanations`;
+    badge.innerHTML = `Pro — full problem library, unlimited explanations`;
   } else {
     // The daily submission/explanation counters rarely bind in practice --
     // the free-tier problem lock is the restriction that actually
@@ -352,7 +355,7 @@ function renderResult(result, isSubmit, studentQuery) {
   let html = "";
 
   if (result.correct) {
-    html += `<div class="result-banner pass">✅ Correct! Verified against DuckDB — no AI call needed.</div>`;
+    html += `<div class="result-banner pass">✅ Correct! Verified against DuckDB.</div>`;
   } else {
     html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
 
@@ -366,7 +369,7 @@ function renderResult(result, isSubmit, studentQuery) {
     if (!tutorOn) {
       // Tutor toggled off client-side -- backend already skipped the LLM call.
     } else if (result.explanation) {
-      html += `<div class="explanation-box"><div class="label">AI Tutor</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
+      html += `<div class="explanation-box"><div class="label">Tutor</div><div id="explanationText">${escapeHtml(result.explanation)}</div></div>`;
       html += `<div id="followupThread" class="followup-thread"></div>
         <div class="followup-input-row">
           <input type="text" id="followupInput" placeholder="Ask a follow-up question about this problem…" />
@@ -380,10 +383,10 @@ function renderResult(result, isSubmit, studentQuery) {
         conversation: [{ role: "assistant", content: result.explanation }],
       };
     } else if (result.explanation_error) {
-      html += `<div class="explanation-box"><div class="label">AI Tutor</div>${escapeHtml(result.explanation_error)}</div>`;
+      html += `<div class="explanation-box"><div class="label">Tutor</div>${escapeHtml(result.explanation_error)}</div>`;
     } else if (!result.explanation_available) {
       html += `<div class="upsell-box">
-        You've used today's free AI tutor messages. Upgrade to Pro (₹199/mo) for unlimited AI help.
+        You've used today's free tutor messages. Upgrade to Pro (₹199/mo) for unlimited help.
         <br/><button id="inlineUpgradeBtn">Upgrade now</button>
       </div>`;
     }
@@ -408,7 +411,7 @@ function renderFollowupThread() {
   const turns = followupState.conversation.slice(1);
   thread.innerHTML = turns.map(t => `
     <div class="followup-turn ${t.role}">
-      <div class="who">${t.role === "user" ? "You" : "AI Tutor"}</div>
+      <div class="who">${t.role === "user" ? "You" : "Tutor"}</div>
       ${escapeHtml(t.content)}
     </div>
   `).join("");
@@ -480,31 +483,15 @@ async function refreshIdentityDependentState() {
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
   renderProblemList();
-  updateSqlTrackMeta();
   await refreshTierBadge();
 }
 
-function updateSqlTrackMeta() {
-  // Deliberately no raw problem count here -- same reasoning as the tier
-  // badge (bank size isn't something we want to publish in the UI).
-  // Topic breadth is fine to show, it's a coverage signal, not a scarcity
-  // one.
-  const el = document.getElementById("sqlTrackMeta");
-  if (!el) return;
-  const topicCount = new Set(allProblems.map(p => p.topic).filter(Boolean)).size;
-  el.textContent = `Real interview-style questions across ${topicCount} topics`;
-}
-
 async function init() {
-  // Sequential, not Promise.all -- refreshTierBadge() reads allProblems to
-  // report "N/M problems unlocked", so it needs /api/problems to have
-  // already landed rather than racing it.
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
   await refreshTierBadge();
   populateTagFilter();
   renderProblemList();
-  updateSqlTrackMeta();
 
   // The very first api() calls above race Clerk's async script load --
   // isSignedIn() is almost always still false at that instant even for a
