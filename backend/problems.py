@@ -2287,15 +2287,19 @@ PROBLEMS = [
 
 
 def seed_if_empty():
-    """One-time migration: populate the `problems` table from PROBLEMS
-    above if the table is empty. No-op on every subsequent startup."""
+    """
+    Incremental seed: inserts any problem from PROBLEMS above whose `id`
+    isn't already in the table. Safe to run on every startup -- new
+    entries added to PROBLEMS between deploys get picked up automatically,
+    existing ones (including admin-approved generated problems, which
+    aren't in this list at all) are left untouched.
+    """
     with db.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM problems")
-            (count,) = cur.fetchone()
-            if count > 0:
-                return
-            for p in PROBLEMS:
+            cur.execute("SELECT id FROM problems")
+            existing_ids = {row[0] for row in cur.fetchall()}
+            new_problems = [p for p in PROBLEMS if p["id"] not in existing_ids]
+            for p in new_problems:
                 cur.execute(
                     """
                     INSERT INTO problems
