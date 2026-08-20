@@ -21,6 +21,14 @@ function formatTime(totalSeconds) {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+// The active session_id lives in localStorage so a page reload, browser
+// crash, or tab close-and-reopen can reconnect to the same interview --
+// the actual state lives in Postgres server-side, this is just the pointer.
+const ACTIVE_SESSION_KEY = "sqlpractice_active_interview_session";
+function setActiveSessionId(id) { localStorage.setItem(ACTIVE_SESSION_KEY, id); }
+function getActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_KEY); }
+function clearActiveSessionId() { localStorage.removeItem(ACTIVE_SESSION_KEY); }
+
 async function uploadResume(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -34,6 +42,68 @@ async function uploadResume(file) {
     throw new Error(body.detail || `Upload failed (${res.status})`);
   }
   return res.json();
+}
+
+async function renderInterviewEntry() {
+  const existingId = getActiveSessionId();
+  if (!existingId) { renderInterviewSetup(); return; }
+
+  const screen = document.getElementById("interviewScreen");
+  screen.innerHTML = `<div class="loading-dots">Checking for an interview in progress…</div>`;
+
+  try {
+    const res = await api(`/api/interview/session/${existingId}`);
+    if (res.ended || res.time_up) {
+      clearActiveSessionId();
+      renderInterviewSetup();
+      return;
+    }
+    renderResumePrompt(res);
+  } catch (err) {
+    // Session not found (expired, wrong user, etc.) -- nothing to resume.
+    clearActiveSessionId();
+    renderInterviewSetup();
+  }
+}
+
+function renderResumePrompt(sessionState) {
+  const screen = document.getElementById("interviewScreen");
+  screen.innerHTML = `
+    <div class="interview-setup">
+      <div class="interview-eyebrow">Pro · Voice Interview</div>
+      <h1>Resume your interview?</h1>
+      <p class="home-sub">You have an interview in progress with ${formatTime(sessionState.remaining_seconds)} left on the clock. Pick up where you left off, or discard it and start fresh.</p>
+      <div class="setup-card">
+        <button class="start-interview-btn" id="resumeBtn"><span>Resume Interview</span></button>
+        <button class="end-interview-btn" id="discardBtn" style="align-self:center;">Discard and start over</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("resumeBtn").onclick = () => resumeInterview(sessionState);
+  document.getElementById("discardBtn").onclick = () => {
+    clearActiveSessionId();
+    renderInterviewSetup();
+  };
+}
+
+function resumeInterview(sessionState) {
+  interviewState = {
+    sessionId: sessionState.session_id,
+    mode: sessionState.mode,
+    resumeText: null,
+    remainingSeconds: sessionState.remaining_seconds,
+    durationSeconds: sessionState.duration_seconds || 45 * 60,
+    timerHandle: null,
+    transcript: sessionState.conversation.length
+      ? sessionState.conversation
+      : [{ role: "assistant", content: sessionState.question, topic: sessionState.topic }],
+    tableContext: sessionState.table_context || null,
+  };
+  renderLiveInterview();
+  startTimer();
+  // Don't re-speak automatically on resume -- the candidate may be
+  // reconnecting mid-thought and an unprompted voice can be jarring;
+  // the question is right there in the transcript to read.
 }
 
 function renderInterviewSetup() {
@@ -182,6 +252,7 @@ function beginLiveInterview(startRes, mode, resumeText) {
     transcript: [{ role: "assistant", content: startRes.question, topic: startRes.topic }],
     tableContext: startRes.table_context || null,
   };
+  setActiveSessionId(startRes.session_id);
   renderLiveInterview();
   speak(startRes.question);
   startTimer();
@@ -461,6 +532,7 @@ async function endInterview() {
       method: "POST",
       body: JSON.stringify({ session_id: interviewState.sessionId }),
     });
+    clearActiveSessionId();
     renderFeedback(res.feedback);
   } catch (err) {
     screen.innerHTML = `<div class="feedback-report">
@@ -512,7 +584,7 @@ function renderFeedback(report) {
   document.getElementById("backHomeBtn").onclick = showHome;
 }
 
-window.renderInterviewSetup = renderInterviewSetup;
+window.renderInterviewSetup = renderInterviewEntry;
 window.stopInterviewAudio = () => {
   window.speechSynthesis?.cancel();
   clearInterval(speechKeepAliveTimer);

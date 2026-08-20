@@ -8,13 +8,17 @@ on the LLM to act as the interviewer: decide whether to follow up on a gap,
 probe deeper on a promising thread, or move to a new topic, per the
 progression the product spec calls for.
 
-Sessions live in memory only (same tradeoff as usage tracking in main.py) --
-fine for an MVP, would need a real store (Redis/Postgres) before this survives
-a server restart mid-interview reliably.
+Session state is persisted to Postgres (db.py) on every mutation, so an
+in-progress interview survives a browser crash, a transient LLM failure, or
+the backend restarting -- see db.py's docstring for why. Every function
+here takes/returns a plain dict (not an ORM object) to keep this simple.
 """
 
+import json
 import time
 import uuid
+
+import db
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
 MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
@@ -32,15 +36,11 @@ GENERIC_TOPICS = [
     "Transactions and ACID properties",
 ]
 
-# session_id -> session dict
-_SESSIONS: dict[str, dict] = {}
-
 
 def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS) -> dict:
     duration_seconds = max(MIN_INTERVIEW_DURATION_SECONDS, min(INTERVIEW_DURATION_SECONDS, duration_seconds))
-    session_id = str(uuid.uuid4())
     session = {
-        "session_id": session_id,
+        "session_id": str(uuid.uuid4()),
         "user_id": user_id,
         "mode": mode,  # "personalized" | "generic"
         "resume_text": resume_text,
@@ -51,15 +51,60 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
         "conversation": [],  # [{"role": "assistant"|"user", "content": str, "topic": str|None}]
         "current_topic": None,
         "current_topic_turns": 0,
+        "last_table_context": None,
         "ended": False,
         "feedback": None,
     }
-    _SESSIONS[session_id] = session
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO interview_sessions
+                    (session_id, user_id, mode, resume_text, skip_intro, duration_seconds,
+                     started_at, topics_covered, conversation, current_topic,
+                     current_topic_turns, last_table_context, ended, feedback)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    session["session_id"], session["user_id"], session["mode"],
+                    session["resume_text"], session["skip_intro"], session["duration_seconds"],
+                    session["started_at"], json.dumps(session["topics_covered"]),
+                    json.dumps(session["conversation"]), session["current_topic"],
+                    session["current_topic_turns"], json.dumps(session["last_table_context"]),
+                    session["ended"], json.dumps(session["feedback"]),
+                ),
+            )
     return session
 
 
+def save_session(session: dict):
+    """Persists the current in-memory state of `session` to Postgres. Call
+    after any mutation (record_turn, update_topic_tracking, mark_ended,
+    setting last_table_context, ...) so a crash right after doesn't lose it."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE interview_sessions SET
+                    topics_covered=%s, conversation=%s, current_topic=%s,
+                    current_topic_turns=%s, last_table_context=%s, ended=%s, feedback=%s
+                WHERE session_id=%s
+                """,
+                (
+                    json.dumps(session["topics_covered"]), json.dumps(session["conversation"]),
+                    session["current_topic"], session["current_topic_turns"],
+                    json.dumps(session["last_table_context"]), session["ended"],
+                    json.dumps(session["feedback"]), session["session_id"],
+                ),
+            )
+
+
 def get_session(session_id: str) -> dict | None:
-    return _SESSIONS.get(session_id)
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute("SELECT * FROM interview_sessions WHERE session_id = %s", (session_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
 
 
 def elapsed_seconds(session: dict) -> float:
@@ -76,6 +121,16 @@ def is_time_up(session: dict) -> bool:
 
 def record_turn(session: dict, role: str, content: str, topic: str | None = None):
     session["conversation"].append({"role": role, "content": content, "topic": topic})
+    save_session(session)
+
+
+def remove_last_turn(session: dict):
+    """Rolls back the most recently recorded turn (e.g. after an LLM call
+    fails partway through a request) so a resumed session doesn't retain a
+    dangling turn with no reply."""
+    if session["conversation"]:
+        session["conversation"].pop()
+        save_session(session)
 
 
 def update_topic_tracking(session: dict, action: str, topic: str):
@@ -91,6 +146,19 @@ def update_topic_tracking(session: dict, action: str, topic: str):
             session["topics_covered"].append(topic)
     else:
         session["current_topic_turns"] += 1
+    save_session(session)
+
+
+def set_last_table_context(session: dict, table_context: dict | None):
+    if table_context:
+        session["last_table_context"] = table_context
+        save_session(session)
+
+
+def mark_ended(session: dict, feedback: dict):
+    session["ended"] = True
+    session["feedback"] = feedback
+    save_session(session)
 
 
 def topic_cap_reached(session: dict) -> bool:
@@ -112,3 +180,12 @@ def next_topic(session: dict, topics: list[str]) -> str:
         idx = topics.index(session["current_topic"])
         return topics[(idx + 1) % len(topics)]
     return topics[0]
+
+
+def last_question(session: dict) -> dict | None:
+    """Returns the most recent assistant turn (the question currently
+    awaiting an answer), used to rehydrate a resumed session's UI."""
+    for turn in reversed(session["conversation"]):
+        if turn["role"] == "assistant":
+            return turn
+    return None

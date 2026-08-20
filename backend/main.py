@@ -33,6 +33,7 @@ import sandbox
 import llm
 import interview
 import resume_parser
+import db
 
 app = FastAPI(title="SQL Practice MVP")
 
@@ -59,6 +60,12 @@ def _warm_expected_cache():
     for p in PROBLEMS:
         cols, rows, _ = sandbox.compute_expected_output(p)
         _EXPECTED_CACHE[p["id"]] = (cols, rows)
+
+
+@app.on_event("startup")
+def _init_interview_db():
+    if db.DATABASE_URL:
+        db.init_schema()
 
 
 def _today():
@@ -367,6 +374,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
 
     interview.record_turn(session, "assistant", question, topic)
     interview.update_topic_tracking(session, action, topic)
+    interview.set_last_table_context(session, table_context)
 
     return {
         "session_id": session["session_id"],
@@ -419,11 +427,12 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a
         # transient failure doesn't leave a duplicate in the transcript.
-        session["conversation"].pop()
+        interview.remove_last_turn(session)
         raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
 
     interview.record_turn(session, "assistant", result["question"], result["topic"])
     interview.update_topic_tracking(session, result["action"], result["topic"])
+    interview.set_last_table_context(session, result["table_context"])
 
     return {
         "time_up": False,
@@ -436,6 +445,35 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
     }
 
 
+@app.get("/api/interview/session/{session_id}")
+def api_interview_resume(session_id: str, x_user_id: str = Header(default=None)):
+    """
+    Lets the frontend reconnect to an in-progress interview after a page
+    reload, browser crash, or anything else that wiped its local state --
+    the session itself lives in Postgres, not the browser, so as long as
+    the interview hasn't ended it can always be picked back up from here.
+    """
+    user_id = x_user_id or str(uuid.uuid4())
+    session = interview.get_session(session_id)
+    if not session or session["user_id"] != user_id:
+        raise HTTPException(404, "Interview session not found")
+
+    question_turn = interview.last_question(session)
+    return {
+        "session_id": session["session_id"],
+        "mode": session["mode"],
+        "ended": session["ended"],
+        "feedback": session["feedback"],
+        "conversation": session["conversation"],
+        "question": question_turn["content"] if question_turn else None,
+        "topic": question_turn["topic"] if question_turn else None,
+        "table_context": session["last_table_context"],
+        "remaining_seconds": interview.remaining_seconds(session),
+        "duration_seconds": session["duration_seconds"],
+        "time_up": interview.is_time_up(session),
+    }
+
+
 @app.post("/api/interview/end")
 def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=None)):
     user_id = x_user_id or str(uuid.uuid4())
@@ -443,12 +481,17 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
     if not session or session["user_id"] != user_id:
         raise HTTPException(404, "Interview session not found")
 
+    if session["ended"] and session["feedback"] is not None:
+        return {"feedback": session["feedback"], "conversation": session["conversation"]}
+
     if session["feedback"] is None:
         try:
             result = llm.interview_feedback(user_id=user_id, conversation=session["conversation"])
-            session["feedback"] = result["report"]
+            feedback = result["report"]
         except Exception as e:
             raise HTTPException(502, f"Couldn't generate feedback report right now ({e}).")
+    else:
+        feedback = session["feedback"]
 
-    session["ended"] = True
-    return {"feedback": session["feedback"], "conversation": session["conversation"]}
+    interview.mark_ended(session, feedback)
+    return {"feedback": feedback, "conversation": session["conversation"]}

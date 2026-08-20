@@ -169,13 +169,22 @@ unsupported). To upgrade later to Groq Whisper for STT, only the
 change — the orchestration logic in `interview.py`/`llm.py` is unaffected
 since it already just deals in text.
 
-**Session state is in-memory** (`interview._SESSIONS`), same tradeoff as
-usage tracking — an interview in progress does **not** survive a backend
-restart or Render's free-tier spin-down after 15 min idle. Mid-conversation,
-that's rare (an active interview keeps the service warm), but starting one
-right after a long idle gap can 404 with "Interview session not found" if
-the service was mid-cold-start. Worth a real store (Redis/Postgres) before
-this survives production traffic patterns.
+**Session state is persisted to Postgres** (`backend/db.py`,
+`interview_sessions` table) on every turn — so unlike the rest of the app's
+in-memory state (usage tracking, tier), an in-progress interview survives a
+browser crash/reload, a transient LLM failure, or the backend itself
+restarting. `GET /api/interview/session/{id}` lets the frontend reconnect
+to an existing session and rehydrate the full transcript, current question,
+table context, and remaining time; the frontend tracks the active
+`session_id` in `localStorage` and offers a "Resume interview?" prompt
+before falling through to the normal setup screen. Once an interview ends
+(`interview.mark_ended`), only the feedback report matters — there's no
+further persistence need after that point.
+
+Requires the `sql-practice-db` Postgres instance declared in `render.yaml`
+(`databases:` section, wired to the backend via `DATABASE_URL`
+`fromDatabase`). Render's free Postgres tier auto-expires 30 days after
+creation unless upgraded — a real constraint to revisit, not a bug.
 
 **Cost note**: unlike the practice platform (LLM only called on wrong
 answers), a full interview makes many LLM calls over 45 minutes — hence
