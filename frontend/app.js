@@ -11,14 +11,19 @@ function getUserId() {
 const USER_ID = getUserId();
 
 async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User-Id": USER_ID,
-      ...(options.headers || {}),
-    },
-  });
+  const headers = {
+    "Content-Type": "application/json",
+    "X-User-Id": USER_ID,
+    ...(options.headers || {}),
+  };
+  // When signed in, prefer the verified Clerk identity over the anonymous
+  // X-User-Id -- the backend trusts this token over the header if both are
+  // present (see auth.resolve_user_id in main.py).
+  if (typeof isSignedIn === "function" && isSignedIn()) {
+    const token = await getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const err = new Error(body.detail || `Request failed (${res.status})`);
@@ -77,9 +82,58 @@ async function refreshTierBadge() {
   return usage;
 }
 
+let razorpayScriptPromise = null;
+function loadRazorpayScript() {
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(e);
+    document.head.appendChild(s);
+  });
+  return razorpayScriptPromise;
+}
+
 async function doUpgrade() {
-  await api("/api/dev/upgrade", { method: "POST" });
-  await refreshTierBadge();
+  if (typeof isSignedIn !== "function" || !isSignedIn()) {
+    if (window.Clerk) window.Clerk.openSignIn({});
+    return;
+  }
+
+  try {
+    await loadRazorpayScript();
+    const order = await api("/api/payments/create-order", { method: "POST" });
+
+    const rzp = new Razorpay({
+      key: order.key_id,
+      amount: order.amount,
+      currency: order.currency,
+      order_id: order.order_id,
+      name: "Phoenix Prep",
+      description: "Pro membership -- ₹199/mo",
+      prefill: { email: (typeof currentUserEmail === "function" && currentUserEmail()) || "" },
+      theme: { color: "#4f8cff" },
+      handler: async (response) => {
+        try {
+          await api("/api/payments/verify", {
+            method: "POST",
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          await refreshTierBadge();
+        } catch (e) {
+          alert(`Payment went through but we couldn't verify it (${e.message}). Contact support with payment id ${response.razorpay_payment_id}.`);
+        }
+      },
+    });
+    rzp.open();
+  } catch (e) {
+    alert(`Couldn't start checkout: ${e.message}`);
+  }
 }
 
 async function resetProgress() {

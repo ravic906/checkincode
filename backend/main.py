@@ -7,22 +7,22 @@ Run with:
 Env vars (see llm.py):
     LLM_API_BASE, LLM_API_KEY, LLM_MODEL
 
-Tiering (MVP-simple, in-memory, resets on restart -- swap for a real DB /
-auth system before launch):
+Tiering (Postgres-backed, see users.py):
     - Every request carries an `X-User-Id` header (frontend generates a
-      random one and stores it in localStorage). No real auth in the MVP.
+      random one and stores it in localStorage) as a fallback identity.
+      If it also carries `Authorization: Bearer <Clerk session token>`,
+      that's verified (see auth.py) and used instead -- signing in isn't
+      mandatory for practice mode, only for anything tied to a real
+      identity (payments).
     - Free tier: FREE_DAILY_SUBMISSIONS submissions/day, FREE_DAILY_EXPLANATIONS
-      AI explanations/day.
-    - Paid tier: unlimited explanations. There's no real payment flow yet --
-      POST /api/dev/upgrade flips a user to paid, standing in for whatever
-      payment webhook (Razorpay etc.) would call it for real.
+      AI explanations/day, plus only the curated free-tier problem subset.
+    - Paid tier: unlimited explanations + submissions + the full problem
+      bank + mock interviews. Upgrading goes through Razorpay (payments.py):
+      POST /api/payments/create-order then POST /api/payments/verify.
 """
 
-import datetime
 import hmac
 import os
-import uuid
-from collections import defaultdict
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +38,9 @@ import interview
 import resume_parser
 import db
 import topics
+import auth
+import users as users_module
+import payments
 
 app = FastAPI(title="SQL Practice MVP")
 
@@ -51,9 +54,6 @@ app.add_middleware(
 FREE_DAILY_SUBMISSIONS = 20
 FREE_DAILY_EXPLANATIONS = 3
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
-
-# user_id -> {"tier": "free"|"paid", "date": "YYYY-MM-DD", "submissions": int, "explanations": int}
-_USAGE = defaultdict(lambda: {"tier": "free", "date": None, "submissions": 0, "explanations": 0})
 
 # Precompute expected output for every problem once at startup so grading
 # doesn't re-run the canonical query on every submission.
@@ -69,20 +69,6 @@ def _startup():
         for p in problems_module.list_all_live_problems():
             cols, rows, _ = sandbox.compute_expected_output(p)
             _EXPECTED_CACHE[p["id"]] = (cols, rows)
-
-
-def _today():
-    return datetime.date.today().isoformat()
-
-
-def _get_usage(user_id: str):
-    u = _USAGE[user_id]
-    today = _today()
-    if u["date"] != today:
-        u["date"] = today
-        u["submissions"] = 0
-        u["explanations"] = 0
-    return u
 
 
 class SubmitRequest(BaseModel):
@@ -118,23 +104,29 @@ class InterviewEndRequest(BaseModel):
 
 
 @app.get("/api/problems")
-def api_list_problems(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    tier = _get_usage(user_id)["tier"]
-    problems = list_problems_summary(difficulty=difficulty, tag=tag, topic=topic, user_id=x_user_id)
+def api_list_problems(
+    difficulty: str | None = None,
+    tag: str | None = None,
+    topic: str | None = None,
+    x_user_id: str = Header(default=None),
+    authorization: str | None = Header(default=None),
+):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    tier = users_module.get_usage(user_id)["tier"]
+    problems = list_problems_summary(difficulty=difficulty, tag=tag, topic=topic, user_id=user_id)
     for p in problems:
         p["locked"] = not p["is_free"] and tier != "paid"
     return {"problems": problems}
 
 
 @app.get("/api/problems/{problem_id}")
-def api_get_problem(problem_id: str, x_user_id: str = Header(default=None)):
+def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     p = get_problem(problem_id)
     if not p:
         raise HTTPException(404, "Problem not found")
 
-    user_id = x_user_id or str(uuid.uuid4())
-    tier = _get_usage(user_id)["tier"]
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    tier = users_module.get_usage(user_id)["tier"]
     if not p["is_free"] and tier != "paid":
         raise HTTPException(
             402,
@@ -172,9 +164,9 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None)):
 
 
 @app.get("/api/usage")
-def api_usage(x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+def api_usage(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
     return {
         "user_id": user_id,
         "tier": u["tier"],
@@ -186,24 +178,45 @@ def api_usage(x_user_id: str = Header(default=None)):
 
 
 @app.delete("/api/submissions")
-def api_reset_submissions(x_user_id: str = Header(default=None)):
+def api_reset_submissions(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """Wipes all of the requesting user's submission history (solved
     status resets to nothing). Irreversible -- the frontend confirms with
     the user before calling this."""
-    if not x_user_id:
-        raise HTTPException(400, "X-User-Id header required")
-    deleted = problems_module.reset_user_submissions(x_user_id)
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    deleted = problems_module.reset_user_submissions(user_id)
     return {"deleted": deleted}
 
 
-@app.post("/api/dev/upgrade")
-def api_dev_upgrade(x_user_id: str = Header(default=None)):
-    """Stand-in for a real payment webhook. Flips the user to the paid tier."""
-    if not x_user_id:
-        raise HTTPException(400, "X-User-Id header required")
-    u = _get_usage(x_user_id)
-    u["tier"] = "paid"
-    return {"user_id": x_user_id, "tier": "paid"}
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@app.post("/api/payments/create-order")
+def api_payments_create_order(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    if not user_id.startswith("clerk:"):
+        raise HTTPException(401, "Sign in before upgrading -- Pro is tied to your account, not an anonymous browser id.")
+    try:
+        return payments.create_order(user_id)
+    except payments.PaymentsNotConfigured as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/payments/verify")
+def api_payments_verify(req: VerifyPaymentRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    if not user_id.startswith("clerk:"):
+        raise HTTPException(401, "Sign in before upgrading -- Pro is tied to your account, not an anonymous browser id.")
+    try:
+        ok = payments.verify_payment_signature(req.razorpay_order_id, req.razorpay_payment_id, req.razorpay_signature)
+    except payments.PaymentsNotConfigured as e:
+        raise HTTPException(503, str(e))
+    if not ok:
+        raise HTTPException(400, "Payment signature verification failed.")
+    users_module.set_tier(user_id, "paid")
+    return {"user_id": user_id, "tier": "paid"}
 
 
 def _preview(columns, rows, limit=10):
@@ -211,9 +224,9 @@ def _preview(columns, rows, limit=10):
 
 
 @app.post("/api/submit")
-def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
 
     if u["submissions"] >= FREE_DAILY_SUBMISSIONS and u["tier"] == "free":
         raise HTTPException(
@@ -233,6 +246,7 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
             "Free tier includes a curated sample -- upgrade to unlock all problems.",
         )
 
+    users_module.increment_submission(user_id)
     u["submissions"] += 1
 
     result = {
@@ -296,7 +310,7 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
         )
         result["explanation"] = llm_result["explanation"]
         result["llm_usage"] = llm_result["usage"]
-        u["explanations"] += 1
+        users_module.increment_explanation(user_id)
     except Exception as e:
         result["explanation"] = None
         result["explanation_error"] = f"AI explanation unavailable right now ({e})."
@@ -305,15 +319,15 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None)):
 
 
 @app.post("/api/ask-followup")
-def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None)):
+def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """
     Lets a student ask a free-form follow-up question after an AI
     explanation, e.g. "why does NULL break GROUP BY like that?". Counts
     against the same daily AI-tutor quota as the initial explanation --
     it's the same cost category, just a different shape of question.
     """
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
 
     problem = get_problem(req.problem_id)
     if not problem:
@@ -337,7 +351,7 @@ def api_ask_followup(req: FollowupRequest, x_user_id: str = Header(default=None)
             conversation=req.conversation,
             question=req.question,
         )
-        u["explanations"] += 1
+        users_module.increment_explanation(user_id)
         return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
     except Exception as e:
         raise HTTPException(502, f"AI tutor unavailable right now ({e}).")
@@ -363,9 +377,9 @@ MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB -- a resume has no business be
 
 
 @app.post("/api/interview/parse-resume")
-async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
     _require_paid(u)
 
     file_bytes = await file.read(MAX_RESUME_UPLOAD_BYTES + 1)
@@ -379,9 +393,9 @@ async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header
 
 
 @app.post("/api/interview/start")
-def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
     _require_paid(u)
 
     if req.mode not in ("personalized", "generic"):
@@ -427,9 +441,9 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
 
 
 @app.post("/api/interview/answer")
-def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
-    u = _get_usage(user_id)
+def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
     _require_paid(u)
 
     session = interview.get_session(req.session_id)
@@ -485,14 +499,14 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
 
 
 @app.get("/api/interview/session/{session_id}")
-def api_interview_resume(session_id: str, x_user_id: str = Header(default=None)):
+def api_interview_resume(session_id: str, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """
     Lets the frontend reconnect to an in-progress interview after a page
     reload, browser crash, or anything else that wiped its local state --
     the session itself lives in Postgres, not the browser, so as long as
     the interview hasn't ended it can always be picked back up from here.
     """
-    user_id = x_user_id or str(uuid.uuid4())
+    user_id = auth.resolve_user_id(authorization, x_user_id)
     session = interview.get_session(session_id)
     if not session or session["user_id"] != user_id:
         raise HTTPException(404, "Interview session not found")
@@ -514,8 +528,8 @@ def api_interview_resume(session_id: str, x_user_id: str = Header(default=None))
 
 
 @app.post("/api/interview/end")
-def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=None)):
-    user_id = x_user_id or str(uuid.uuid4())
+def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
     session = interview.get_session(req.session_id)
     if not session or session["user_id"] != user_id:
         raise HTTPException(404, "Interview session not found")

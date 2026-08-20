@@ -120,6 +120,17 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_submissions_user_problem
                 ON submissions (user_id, problem_id)
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT,
+                    tier TEXT NOT NULL DEFAULT 'free',
+                    usage_date DATE,
+                    submissions_today INTEGER NOT NULL DEFAULT 0,
+                    explanations_today INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
 
 
 def dict_cursor(conn):
