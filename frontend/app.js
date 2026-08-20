@@ -73,9 +73,16 @@ async function refreshTierBadge() {
   const badge = document.getElementById("tierBadge");
   badge.classList.toggle("paid", usage.tier === "paid");
   if (usage.tier === "paid") {
-    badge.innerHTML = `Pro — unlimited AI explanations`;
+    badge.innerHTML = `Pro — all problems unlocked, unlimited AI explanations`;
   } else {
-    badge.innerHTML = `Free — ${usage.explanations_today}/${usage.free_daily_explanations} AI explanations today, ${usage.submissions_today}/${usage.free_daily_submissions} submissions <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
+    // The daily submission/explanation counters rarely bind in practice --
+    // the free-tier problem lock is the restriction that actually matters,
+    // so lead with that instead of burying it behind counters that look
+    // generous on their own ("0/20 submissions" reads like broad access).
+    const freeCount = allProblems.filter(p => p.is_free).length;
+    const totalCount = allProblems.length;
+    const problemsText = totalCount > 0 ? `${freeCount}/${totalCount} problems unlocked` : "";
+    badge.innerHTML = `Free — ${problemsText}, ${usage.explanations_today}/${usage.free_daily_explanations} AI explanations today <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
   }
   const btn = document.getElementById("upgradeBtn");
   if (btn) btn.onclick = doUpgrade;
@@ -486,8 +493,12 @@ function updateSqlTrackMeta() {
 }
 
 async function init() {
-  const [problemsRes] = await Promise.all([api("/api/problems"), refreshTierBadge()]);
+  // Sequential, not Promise.all -- refreshTierBadge() reads allProblems to
+  // report "N/M problems unlocked", so it needs /api/problems to have
+  // already landed rather than racing it.
+  const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
+  await refreshTierBadge();
   populateTagFilter();
   renderProblemList();
   updateSqlTrackMeta();
