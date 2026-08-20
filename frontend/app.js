@@ -98,6 +98,7 @@ function renderProblemList() {
   const diff = document.getElementById("difficultyFilter").value;
   const tag = document.getElementById("tagFilter").value;
   const access = document.getElementById("accessFilter").value;
+  const solved = document.getElementById("solvedFilter").value;
   const list = document.getElementById("problemList");
   list.innerHTML = "";
 
@@ -105,6 +106,7 @@ function renderProblemList() {
     (!diff || p.difficulty === diff)
     && (!tag || p.tags.includes(tag))
     && (!access || (access === "free" ? p.is_free : !p.is_free))
+    && (!solved || (solved === "solved" ? p.solved : !p.solved))
   );
 
   for (const p of filtered) {
@@ -401,6 +403,7 @@ async function init() {
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("tagFilter").onchange = renderProblemList;
   document.getElementById("accessFilter").onchange = renderProblemList;
+  document.getElementById("solvedFilter").onchange = renderProblemList;
 
   const tutorToggle = document.getElementById("tutorToggle");
   tutorToggle.checked = getTutorEnabled();
