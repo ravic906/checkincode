@@ -161,6 +161,7 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
             "description": p["description"],
             "track": "python",
             "starter_code": p["starter_code"],
+            "examples": p.get("examples") or [],
         }
 
     con = duckdb.connect(":memory:", config={"enable_external_access": False})
@@ -190,6 +191,7 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
         "track": "sql",
         "schema_sql": p["schema_sql"].strip(),
         "sample_tables": sample_tables,
+        "examples": p.get("examples"),
     }
 
 
@@ -804,6 +806,41 @@ def api_admin_get_problem(problem_id: str, x_admin_token: str = Header(default=N
     if not p:
         raise HTTPException(404, "Problem not found")
     return p
+
+
+@app.post("/api/admin/problems/{problem_id}/compute-examples")
+def api_admin_compute_examples(problem_id: str, x_admin_token: str = Header(default=None)):
+    """
+    Computes and stores the real sample input/output shown to students on
+    the problem page. For SQL this is just the already-cached real
+    canonical_sql result (first 3 rows) against the real seed data -- for
+    Python it actually re-runs test_code in E2B with the target function
+    instrumented, capturing real (args, result) pairs from real passing
+    assertions (see pysandbox.extract_examples). Never a separately
+    hand-written example, so it can't drift from what the problem
+    actually does.
+    """
+    _require_admin(x_admin_token)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+
+    if p.get("track") == "python":
+        examples = pysandbox.extract_examples(
+            canonical_solution=p["canonical_solution"],
+            test_code=p["test_code"],
+            function_signature=p["function_signature"],
+        )
+        problems_module.set_problem_examples(problem_id, examples)
+        return {"id": problem_id, "track": "python", "examples": examples}
+
+    if problem_id in _EXPECTED_CACHE:
+        cols, rows = _EXPECTED_CACHE[problem_id]
+    else:
+        cols, rows, _ = sandbox.compute_expected_output(p)
+    example = {"columns": cols, "rows": [[sandbox._normalize_cell(v) for v in row] for row in rows[:3]]}
+    problems_module.set_problem_examples(problem_id, example)
+    return {"id": problem_id, "track": "sql", "examples": example}
 
 
 @app.post("/api/admin/problems/{problem_id}/approve")

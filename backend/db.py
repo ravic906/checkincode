@@ -130,6 +130,15 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE problems ADD COLUMN IF NOT EXISTS canonical_solution TEXT
             """)
+            # Sample input/output shown to students on the problem page --
+            # for SQL, {columns, rows} computed from canonical_sql against
+            # the real seed data; for Python, a list of real (args, result)
+            # pairs captured by actually running test_code with the target
+            # function instrumented (see pysandbox.extract_examples). Never
+            # separately hand-written, so it can't drift from the truth.
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS examples JSONB
+            """)
             # SQL-specific columns are meaningless for track='python' rows --
             # relax NOT NULL (idempotent; no-ops once already dropped) so a
             # Python problem insert doesn't need to fake empty-string SQL.

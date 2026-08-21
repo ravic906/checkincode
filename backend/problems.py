@@ -2370,6 +2370,15 @@ def get_problem(problem_id: str):
     return dict(row) if row else None
 
 
+def set_problem_examples(problem_id: str, examples: list[dict]) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE problems SET examples = %s WHERE id = %s",
+                (json.dumps(examples), problem_id),
+            )
+
+
 def list_all_live_problems():
     """Used by main.py's startup cache-warming -- every live problem,
     full content (needed to run canonical_sql)."""

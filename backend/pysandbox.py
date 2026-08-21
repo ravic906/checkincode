@@ -19,12 +19,16 @@ module's internals rewritten, not just env vars -- run_python_submission()
 is the seam every caller depends on, and that signature doesn't change.
 """
 
+import json
 import os
 
 from e2b_code_interpreter import Sandbox
 
 E2B_API_KEY = os.environ.get("E2B_API_KEY", "")
 RUN_TIMEOUT_SECONDS = 8
+
+_EXAMPLES_START = "___PHOENIX_EXAMPLES_START___"
+_EXAMPLES_END = "___PHOENIX_EXAMPLES_END___"
 
 
 def run_python_submission(*, student_code: str, test_code: str) -> dict:
@@ -64,3 +68,66 @@ def run_python_submission(*, student_code: str, test_code: str) -> dict:
     if not error_text.strip():
         error_text = stderr.strip() or "Execution failed."
     return {"passed": False, "output": stdout, "error": error_text}
+
+
+def extract_examples(*, canonical_solution: str, test_code: str, function_signature: str, max_examples: int = 2) -> list[dict]:
+    """
+    Runs `canonical_solution` + `test_code` in a real E2B sandbox (the same
+    engine that grades actual submissions) with the target function
+    wrapped in a tracer that records the real arguments and real return
+    value of its first `max_examples` calls made by `test_code`'s own
+    assertions.
+
+    This deliberately never asks the model to separately describe an
+    "example" -- doing so risks a hand-written example silently drifting
+    from what the function actually does. Instead the example IS a real,
+    already-passing test call, captured by instrumenting execution rather
+    than statically parsing test_code (which breaks the moment a test
+    uses an intermediate variable or a `.equals(...)`/`np.array_equal(...)`
+    comparison instead of a bare `f(x) == y`).
+
+    Returns [] (never raises) if extraction fails for any reason -- this
+    is a nice-to-have display enhancement, not something that should be
+    able to break grading or block a draft from being approved.
+    """
+    if not E2B_API_KEY:
+        return []
+
+    tracer_source = f"""
+_phoenix_examples = []
+
+{canonical_solution}
+
+_phoenix_orig_fn = {function_signature}
+
+def _phoenix_tracer(*args, **kwargs):
+    _phoenix_result = _phoenix_orig_fn(*args, **kwargs)
+    if len(_phoenix_examples) < {max_examples}:
+        _phoenix_examples.append({{"args": [repr(a) for a in args], "result": repr(_phoenix_result)}})
+    return _phoenix_result
+
+{function_signature} = _phoenix_tracer
+
+{test_code}
+
+import json as _phoenix_json
+print("{_EXAMPLES_START}")
+print(_phoenix_json.dumps(_phoenix_examples))
+print("{_EXAMPLES_END}")
+"""
+    try:
+        with Sandbox.create(api_key=E2B_API_KEY, timeout=RUN_TIMEOUT_SECONDS) as sandbox:
+            execution = sandbox.run_code(tracer_source, timeout=RUN_TIMEOUT_SECONDS)
+    except Exception:
+        return []
+
+    if execution.error is not None:
+        return []
+
+    stdout = "".join(execution.logs.stdout)
+    try:
+        start = stdout.index(_EXAMPLES_START) + len(_EXAMPLES_START)
+        end = stdout.index(_EXAMPLES_END)
+        return json.loads(stdout[start:end].strip())
+    except (ValueError, json.JSONDecodeError):
+        return []
