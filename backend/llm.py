@@ -1059,7 +1059,13 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
         result = _call_chat_with_retry(
             user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
             max_tokens=min(6000, max(1500, count * 600)), json_mode=False,
-            timeout=120, temperature=0.85,
+            # Lower than the SQL batch's 0.85 -- Python's canonical_solution
+            # has to actually pass its own test_code, and higher
+            # temperature was producing noticeably more self-inconsistent
+            # code (the model's own solution failing its own asserts)
+            # without a corresponding gain in scenario variety worth that
+            # trade for code correctness the way it was for SQL scenarios.
+            timeout=120, temperature=0.6,
         )
         try:
             parsed = _parse_json_reply(result["reply"])
