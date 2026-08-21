@@ -31,7 +31,7 @@ services:
         sync: false
       - key: STT_API_KEY
         sync: false
-      - key: JUDGE0_API_KEY
+      - key: E2B_API_KEY
         sync: false
 
   - type: web
