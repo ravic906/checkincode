@@ -35,6 +35,7 @@ async function api(path, options = {}) {
 
 let allProblems = [];
 let currentProblem = null;
+let currentTrack = "sql"; // "sql" | "python" -- which track's problem list is showing
 let monacoEditor = null;
 let currentTier = "free"; // kept in sync by refreshTierBadge(); Ask Phoenix reads this to decide chat-vs-upsell
 
@@ -69,12 +70,26 @@ function showHome() {
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
 function showSqlTrack() {
+  currentTrack = "sql";
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
+  populateTagFilter();
+  renderProblemList();
+}
+function showPythonTrack() {
+  currentTrack = "python";
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("practiceLayout").style.display = "flex";
+  document.getElementById("interviewScreen").style.display = "none";
+  _onPracticeScreen = true;
+  updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
+  populateTagFilter();
+  renderProblemList();
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
@@ -203,7 +218,8 @@ function renderProblemList() {
   renderTopicFilterBanner();
 
   const filtered = allProblems.filter(p =>
-    (!diff || p.difficulty === diff)
+    (p.track || "sql") === currentTrack
+    && (!diff || p.difficulty === diff)
     && (!tag || p.tags.includes(tag))
     && (!access || (access === "free" ? p.is_free : !p.is_free))
     && (!solved || (solved === "solved" ? p.solved : !p.solved))
@@ -230,8 +246,9 @@ function renderProblemList() {
 
 function populateTagFilter() {
   const tagSet = new Set();
-  allProblems.forEach(p => p.tags.forEach(t => tagSet.add(t)));
+  allProblems.filter(p => (p.track || "sql") === currentTrack).forEach(p => p.tags.forEach(t => tagSet.add(t)));
   const select = document.getElementById("tagFilter");
+  select.innerHTML = `<option value="">All tags</option>`;
   [...tagSet].sort().forEach(t => {
     const opt = document.createElement("option");
     opt.value = t;
@@ -450,46 +467,67 @@ async function loadProblem(id) {
   renderProblemList();
   updateAskPhoenixFabVisibility();
 
-  const tablesHtml = Object.entries(p.sample_tables)
-    .map(([name, table]) => renderTable(name, table))
-    .join("");
-
-  document.getElementById("workspace").innerHTML = `
-    <div class="problem-header">
-      <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
-      <p>${escapeHtml(p.description)}</p>
-    </div>
-    <div class="tables-section">
-      <h3>Schema</h3>
-      <div class="schema-block">${escapeHtml(p.schema_sql)}</div>
-      <h3>Sample Data</h3>
-      ${tablesHtml}
-    </div>
-    <div class="editor-section">
-      <div class="editor-toolbar">
-        <strong>Your Query</strong>
-        <div class="actions">
-          <button class="run-btn" id="runBtn">Run</button>
-          <button class="submit-btn" id="submitBtn">Submit</button>
-        </div>
+  if (p.track === "python") {
+    document.getElementById("workspace").innerHTML = `
+      <div class="problem-header">
+        <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
+        <p>${escapeHtml(p.description)}</p>
       </div>
-      <div id="editor"></div>
-    </div>
-    <div class="results-section" id="resultsSection"></div>
-  `;
+      <div class="editor-section">
+        <div class="editor-toolbar">
+          <strong>Your Code</strong>
+          <div class="actions">
+            <button class="run-btn" id="runBtn">Run</button>
+            <button class="submit-btn" id="submitBtn">Submit</button>
+          </div>
+        </div>
+        <div id="editor"></div>
+      </div>
+      <div class="results-section" id="resultsSection"></div>
+    `;
+    mountEditor("python", p.starter_code || "");
+  } else {
+    const tablesHtml = Object.entries(p.sample_tables)
+      .map(([name, table]) => renderTable(name, table))
+      .join("");
 
-  mountEditor();
+    document.getElementById("workspace").innerHTML = `
+      <div class="problem-header">
+        <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
+        <p>${escapeHtml(p.description)}</p>
+      </div>
+      <div class="tables-section">
+        <h3>Schema</h3>
+        <div class="schema-block">${escapeHtml(p.schema_sql)}</div>
+        <h3>Sample Data</h3>
+        ${tablesHtml}
+      </div>
+      <div class="editor-section">
+        <div class="editor-toolbar">
+          <strong>Your Query</strong>
+          <div class="actions">
+            <button class="run-btn" id="runBtn">Run</button>
+            <button class="submit-btn" id="submitBtn">Submit</button>
+          </div>
+        </div>
+        <div id="editor"></div>
+      </div>
+      <div class="results-section" id="resultsSection"></div>
+    `;
+    mountEditor("sql", "SELECT\n  *\nFROM ");
+  }
+
   document.getElementById("runBtn").onclick = () => runQuery(false);
   document.getElementById("submitBtn").onclick = () => runQuery(true);
 }
 
-function mountEditor() {
+function mountEditor(language, seedValue) {
   require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.47.0/min/vs" } });
   require(["vs/editor/editor.main"], function () {
     if (monacoEditor) monacoEditor.dispose();
     monacoEditor = monaco.editor.create(document.getElementById("editor"), {
-      value: "SELECT\n  *\nFROM ",
-      language: "sql",
+      value: seedValue,
+      language: language,
       theme: "vs-dark",
       minimap: { enabled: false },
       fontSize: 13,
@@ -513,8 +551,9 @@ function renderPreviewTable(preview) {
 
 async function runQuery(isSubmit) {
   const query = monacoEditor.getValue();
+  const isPython = currentProblem.track === "python";
   const resultsSection = document.getElementById("resultsSection");
-  resultsSection.innerHTML = `<div class="loading-dots">Running against DuckDB…</div>`;
+  resultsSection.innerHTML = `<div class="loading-dots">${isPython ? "Running in the sandbox…" : "Running against DuckDB…"}</div>`;
 
   const runBtn = document.getElementById("runBtn");
   const submitBtn = document.getElementById("submitBtn");
@@ -526,7 +565,7 @@ async function runQuery(isSubmit) {
       method: "POST",
       body: JSON.stringify({ problem_id: currentProblem.id, query }),
     });
-    renderResult(result);
+    if (isPython) renderPythonResult(result); else renderResult(result);
     if (result.correct) {
       const problemsRes = await api("/api/problems");
       allProblems = problemsRes.problems;
@@ -567,6 +606,25 @@ function renderResult(result) {
       </div>`;
     }
 
+    html += `<p class="ask-phoenix-hint">Stuck? Tap <strong>Ask Phoenix</strong> for help with this problem.</p>`;
+  }
+
+  resultsSection.innerHTML = html;
+  const upBtn = document.getElementById("inlineUpgradeBtn");
+  if (upBtn) upBtn.onclick = doUpgrade;
+}
+
+function renderPythonResult(result) {
+  const resultsSection = document.getElementById("resultsSection");
+  let html = "";
+
+  if (result.correct) {
+    html += `<div class="result-banner pass">✅ Correct! All tests passed.</div>`;
+  } else {
+    html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
+    if (result.output) {
+      html += `<div class="schema-block">${escapeHtml(result.output)}</div>`;
+    }
     html += `<p class="ask-phoenix-hint">Stuck? Tap <strong>Ask Phoenix</strong> for help with this problem.</p>`;
   }
 
@@ -747,6 +805,7 @@ async function init() {
 
   document.getElementById("brandHome").onclick = showHome;
   document.getElementById("trackSql").onclick = showSqlTrack;
+  document.getElementById("trackPython").onclick = showPythonTrack;
   document.getElementById("trackInterview").onclick = () => {
     showInterviewScreen();
     if (window.renderInterviewSetup) window.renderInterviewSetup();

@@ -40,6 +40,8 @@ import resume_parser
 import stt
 import db
 import topics
+import py_topics
+import pysandbox
 import auth
 import users as users_module
 import payments
@@ -68,6 +70,11 @@ def _startup():
         problems_module.seed_if_empty()
         problems_module.mark_free_problems()
         for p in problems_module.list_all_live_problems():
+            if p.get("track", "sql") != "sql":
+                # Python submissions are graded live against test_code via
+                # pysandbox on every submit, not diffed against a cached
+                # expected output -- nothing to precompute here.
+                continue
             cols, rows, _ = sandbox.compute_expected_output(p)
             _EXPECTED_CACHE[p["id"]] = (cols, rows)
 
@@ -115,12 +122,13 @@ def api_list_problems(
     difficulty: str | None = None,
     tag: str | None = None,
     topic: str | None = None,
+    track: str | None = None,
     x_user_id: str = Header(default=None),
     authorization: str | None = Header(default=None),
 ):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     tier = users_module.get_usage(user_id)["tier"]
-    problems = list_problems_summary(difficulty=difficulty, tag=tag, topic=topic, user_id=user_id)
+    problems = list_problems_summary(difficulty=difficulty, tag=tag, topic=topic, user_id=user_id, track=track)
     for p in problems:
         p["locked"] = not p["is_free"] and tier != "paid"
     return {"problems": problems}
@@ -140,6 +148,18 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
             "This problem is part of the Pro problem bank (₹199/mo). "
             "Free tier includes a curated sample -- upgrade to unlock all problems.",
         )
+
+    if p.get("track") == "python":
+        return {
+            "id": p["id"],
+            "title": p["title"],
+            "difficulty": p["difficulty"],
+            "topic": p["topic"],
+            "tags": p["tags"],
+            "description": p["description"],
+            "track": "python",
+            "starter_code": p["starter_code"],
+        }
 
     con = duckdb.connect(":memory:", config={"enable_external_access": False})
     try:
@@ -165,6 +185,7 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
         "topic": p["topic"],
         "tags": p["tags"],
         "description": p["description"],
+        "track": "sql",
         "schema_sql": p["schema_sql"].strip(),
         "sample_tables": sample_tables,
     }
@@ -276,6 +297,22 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
 
     users_module.increment_submission(user_id)
     u["submissions"] += 1
+
+    if problem.get("track") == "python":
+        result = {"correct": False, "error": None, "output": None}
+        try:
+            graded = pysandbox.run_python_submission(
+                student_code=req.query, test_code=problem["test_code"],
+            )
+        except RuntimeError as e:
+            result["error"] = f"Grading temporarily unavailable ({e})."
+        else:
+            result["correct"] = graded["passed"]
+            result["output"] = graded["output"]
+            if not graded["passed"]:
+                result["error"] = graded["error"]
+        problems_module.record_submission(user_id, problem["id"], result["correct"])
+        return result
 
     result = {
         "correct": False,
@@ -619,6 +656,7 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
 class GenerateBatchRequest(BaseModel):
     count: int = 5
     topics: list[str] | None = None  # defaults to all gradeable topics if omitted
+    track: str = "sql"  # "sql" | "python"
 
 
 def _require_admin(x_admin_token: str | None):
@@ -641,10 +679,14 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
     the last batch; it's also callable by hand for an out-of-cycle batch.
     """
     _require_admin(x_admin_token)
-    target_topics = req.topics or topics.GRADEABLE_TOPICS
+    if req.track not in ("sql", "python"):
+        raise HTTPException(400, "track must be 'sql' or 'python'")
+    is_python = req.track == "python"
+    target_topics = req.topics or (py_topics.PY_GRADEABLE_TOPICS if is_python else topics.GRADEABLE_TOPICS)
 
     try:
-        result = llm.generate_problem_batch(
+        generate_fn = llm.generate_python_problem_batch if is_python else llm.generate_problem_batch
+        result = generate_fn(
             user_id="admin",
             topics=target_topics,
             count=req.count,
@@ -656,7 +698,7 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
     inserted, skipped = [], []
     for draft in result["problems"]:
         try:
-            problem_id = problems_module.insert_pending_draft(draft)
+            problem_id = problems_module.insert_pending_draft(draft, track=req.track)
             inserted.append(problem_id)
         except problems_module.InvalidDraftProblem as e:
             skipped.append({"title": draft.get("title", "<untitled>"), "reason": str(e)})
@@ -679,9 +721,12 @@ def api_admin_approve(problem_id: str, x_admin_token: str = Header(default=None)
         raise HTTPException(404, "Pending problem not found.")
     # Warm this problem's expected-output cache immediately -- otherwise
     # the first submission against it would KeyError until next restart.
+    # Python problems are graded live against test_code, not a cached
+    # expected output, so there's nothing to warm for those.
     approved = problems_module.get_problem(problem_id)
-    cols, rows, _ = sandbox.compute_expected_output(approved)
-    _EXPECTED_CACHE[problem_id] = (cols, rows)
+    if approved.get("track", "sql") == "sql":
+        cols, rows, _ = sandbox.compute_expected_output(approved)
+        _EXPECTED_CACHE[problem_id] = (cols, rows)
     return {"id": problem_id, "status": "live"}
 
 

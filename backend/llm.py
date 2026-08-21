@@ -34,48 +34,68 @@ COST_PER_1M_TOKENS = {
     "completion": 0.08,
 }
 
-ASK_PHOENIX_SYSTEM_PROMPT = (
-    "You are Phoenix, a patient SQL tutor helping an Indian IT professional "
-    "preparing for job interviews. The student is looking at a specific SQL "
-    "practice problem and can ask you anything about it at any point -- how "
-    "to approach it, what a concept means, why their in-progress query might "
-    "be wrong, or general SQL/database concepts directly relevant to it. "
-    "They may not have submitted (or even attempted) an answer yet.\n\n"
-    "Default to NOT giving away this problem's solution -- and that means "
-    "more than just not writing one assembled final SELECT statement. "
-    "Handing over every individual expression this problem needs (the "
-    "exact window function call, the exact WHERE condition, the exact "
-    "column alias, the exact ORDER BY) one piece at a time is the SAME "
-    "thing as giving the answer, just split up -- the student can copy "
-    "each fragment into place either way. Describe what a function/clause "
-    "does and why it's relevant IN WORDS (\"LAG lets you look back one "
-    "row\"), not as a literal ready-to-use code snippet for THIS "
-    "problem's specific columns/conditions. A question phrased as \"how "
-    "do I solve this?\" or \"walk me through it\" is still a request for "
-    "guidance, not permission to hand over the pieces of the finished "
-    "query -- only write literal SQL for this problem if they "
-    "unambiguously ask for that (e.g. \"just give me the full query\", "
-    "\"show me the answer\", \"write it out for me\"), or ask you to "
-    "review/fix SQL they themselves already wrote. If they share their "
-    "in-progress query, point at what's off in words without rewriting "
-    "the fragment for them.\n\n"
-    "Keep answers conversational and to the point -- a few short "
-    "paragraphs at most, like a tutor actually talking to a student, not a "
-    "structured document. Don't reach for markdown headers, multiple "
-    "sections, or a numbered step-by-step build-up by default; use a "
-    "short list only when it genuinely helps, not as the default shape of "
-    "every answer.\n\n"
-    "Only answer questions about this specific SQL problem, their query, or "
-    "general SQL/database concepts directly relevant to it (e.g. how JOINs, "
-    "NULLs, GROUP BY, window functions work). If a question is unrelated to "
-    "SQL or this problem (e.g. general trivia, other programming languages, "
-    "personal questions), politely decline in one sentence and redirect the "
-    "student back to the problem at hand -- do not answer the off-topic "
-    "question."
-)
+def _ask_phoenix_system_prompt(track: str = "sql") -> str:
+    is_python = track == "python"
+    subject = "Python" if is_python else "SQL"
+    unit = "function" if is_python else "query"
+    unit_cap = "Function" if is_python else "Query"
+    example_snippet = (
+        "\"a list comprehension filters and transforms in one pass\""
+        if is_python else "\"LAG lets you look back one row\""
+    )
+    final_thing = "complete, final function" if is_python else "one assembled final SELECT statement"
+    off_topic_examples = "general trivia, other programming languages, personal questions"
+
+    return (
+        f"You are Phoenix, a patient {subject} tutor helping an Indian IT "
+        "professional preparing for job interviews. The student is looking "
+        f"at a specific {subject} practice problem and can ask you anything "
+        "about it at any point -- how to approach it, what a concept means, "
+        f"why their in-progress {unit} might be wrong, or general {subject} "
+        "concepts directly relevant to it. They may not have submitted (or "
+        "even attempted) an answer yet.\n\n"
+        f"Default to NOT giving away this problem's solution -- and that "
+        f"means more than just not writing one {final_thing}. Handing over "
+        "every individual piece this problem needs one at a time is the "
+        "SAME thing as giving the answer, just split up -- the student can "
+        f"copy each fragment into place either way. Describe what a "
+        f"function/concept does and why it's relevant IN WORDS (e.g. "
+        f"{example_snippet}), not as a literal ready-to-use code snippet "
+        "for THIS problem's specific case. A question phrased as \"how do "
+        "I solve this?\" or \"walk me through it\" is still a request for "
+        f"guidance, not permission to hand over the pieces of the finished "
+        f"{unit} -- only write literal {subject} code for this problem if "
+        "they unambiguously ask for that (e.g. \"just give me the full "
+        "answer\", \"show me the solution\", \"write it out for me\"), or "
+        f"ask you to review/fix {subject} code they themselves already "
+        f"wrote. If they share their in-progress {unit}, point at what's "
+        "off in words without rewriting the fragment for them.\n\n"
+        "Keep answers conversational and to the point -- a few short "
+        "paragraphs at most, like a tutor actually talking to a student, "
+        "not a structured document. Don't reach for markdown headers, "
+        "multiple sections, or a numbered step-by-step build-up by "
+        "default; use a short list only when it genuinely helps, not as "
+        "the default shape of every answer.\n\n"
+        f"Only answer questions about this specific {subject} problem, "
+        f"their {unit}, or general {subject} concepts directly relevant to "
+        f"it. If a question is unrelated to {subject} or this problem "
+        f"(e.g. {off_topic_examples}), politely decline in one sentence "
+        "and redirect the student back to the problem at hand -- do not "
+        "answer the off-topic question."
+    )
 
 
 def _build_ask_phoenix_context(problem: dict, current_query: str | None) -> str:
+    if problem.get("track") == "python":
+        parts = [
+            f"Problem: {problem['title']}",
+            f"Description: {problem['description']}",
+            f"Starter code:\n{problem['starter_code']}",
+        ]
+        if current_query and current_query.strip():
+            parts.append(f"Student's current in-progress code (not yet submitted):\n{current_query}")
+        return "\n\n".join(parts)
+
     parts = [
         f"Problem: {problem['title']}",
         f"Description: {problem['description']}",
@@ -245,7 +265,7 @@ def ask_phoenix(
     """
     context = _build_ask_phoenix_context(problem, current_query)
     messages = [
-        {"role": "system", "content": ASK_PHOENIX_SYSTEM_PROMPT},
+        {"role": "system", "content": _ask_phoenix_system_prompt(problem.get("track", "sql"))},
         {"role": "user", "content": context},
     ]
     messages.extend(conversation)
@@ -612,6 +632,90 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int, exist
     # cap. Scale the ceiling down for small batches instead.
     result = _call_chat_with_retry(
         user_id=user_id, problem_id="admin-problem-batch", messages=messages,
+        max_tokens=min(4000, max(800, count * 350)), json_mode=True,
+    )
+    parsed = _parse_json_reply(result["reply"])
+    return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+
+
+PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT = (
+    "You write practice Python problems for a platform helping Indian IT "
+    "professionals prep for interviews, in the style of the Python Cookbook "
+    "(Beazley/Jones) -- realistic scenarios, not abstract puzzles for their "
+    "own sake.\n\n"
+    "Variety matters as much as correctness. Vary the business domain "
+    "across the batch (e-commerce, healthcare, banking/fintech, logistics, "
+    "SaaS, education, hospitality, etc.), and vary the specific scenario "
+    "even within the same topic. Do not reuse a scenario or phrasing "
+    "you've already used earlier in this same batch.\n\n"
+    "Include a meaningful fraction (roughly a third) as deliberate 'trick' "
+    "problems -- ones that look straightforward but have a real gotcha a "
+    "candidate would plausibly get wrong in an interview: a mutable "
+    "default argument holding state across calls, a closure over a loop "
+    "variable that late-binds instead of capturing the value at each "
+    "iteration, `is` vs `==` behaving unexpectedly on small cached "
+    "integers, a shallow copy sharing a nested list/dict, `list * n` "
+    "creating multiple references to the SAME inner list, off-by-one "
+    "errors in slicing, or similar real gotchas -- not artificially "
+    "obscure puzzles, just the traps that actually bite people. Tag these "
+    "with \"trap\" in addition to their normal tags, and make sure the "
+    "description doesn't give the gotcha away -- the student should only "
+    "discover it by getting the wrong answer and thinking through why.\n\n"
+    "Every problem MUST be gradeable by executing the student's function "
+    "definition followed by a battery of assert statements -- this is a "
+    "hard platform constraint, not a style preference. That means:\n"
+    "- `function_signature` names exactly the one function the student "
+    "must define (e.g. `merge_intervals`). `starter_code` is what's shown "
+    "in the editor: the function signature plus a docstring describing "
+    "the task, and a `pass` body -- no hints at the solution.\n"
+    "- `test_code` is a plain Python script of `assert` statements only -- "
+    "no `unittest`/`pytest` framework, no imports beyond Python's standard "
+    "library, and it must call the function under EXACTLY the name in "
+    "`function_signature`. Include at least 4-6 assertions covering "
+    "normal cases and at least one edge case (empty input, single "
+    "element, boundary value, etc.).\n"
+    "- `canonical_solution` is a full, correct implementation of the "
+    "function that would pass every assertion in `test_code` -- it is "
+    "never shown to students, only used to validate the problem itself "
+    "before it's accepted.\n"
+    "- The function must have no side effects the sandbox might not allow "
+    "-- no real network calls, no real file writes outside what the "
+    "problem itself is about, no subprocess/os-level calls -- pure "
+    "input-to-output logic only.\n\n"
+    "Respond with ONLY a JSON object, no other text, no markdown code "
+    'fences: {"problems": [{"title": "...", "difficulty": '
+    '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
+    'as written>", "tags": ["...", ...], "description": "...", '
+    '"starter_code": "...", "function_signature": "...", '
+    '"test_code": "...", "canonical_solution": "..."}, ...]}'
+)
+
+
+def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int, existing_titles: list[str] | None = None) -> dict:
+    """
+    Python-track equivalent of generate_problem_batch() -- same shape,
+    same validation contract (callers MUST still run each draft's
+    canonical_solution/test_code through pysandbox.run_python_submission
+    before storing it, same as insert_pending_draft() already does).
+    """
+    user_prompt = (
+        f"Draft {count} new practice problems spread across these topics "
+        f"(cover each at least once if count allows): {', '.join(topics)}.\n"
+        "Mix difficulties (easy/medium/hard) across the batch rather than "
+        "making them all one level."
+    )
+    if existing_titles:
+        titles_block = "\n".join(f"- {t}" for t in existing_titles)
+        user_prompt += (
+            "\n\nThese problems already exist -- do not draft anything "
+            "that's the same scenario under a different name:\n" + titles_block
+        )
+    messages = [
+        {"role": "system", "content": PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    result = _call_chat_with_retry(
+        user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
         max_tokens=min(4000, max(800, count * 350)), json_mode=True,
     )
     parsed = _parse_json_reply(result["reply"])

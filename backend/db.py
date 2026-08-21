@@ -85,12 +85,17 @@ def init_schema():
                     topic TEXT NOT NULL,
                     tags JSONB NOT NULL DEFAULT '[]',
                     description TEXT NOT NULL,
-                    schema_sql TEXT NOT NULL,
-                    seed_sql TEXT NOT NULL,
-                    canonical_sql TEXT NOT NULL,
+                    schema_sql TEXT,
+                    seed_sql TEXT,
+                    canonical_sql TEXT,
                     order_matters BOOLEAN NOT NULL DEFAULT FALSE,
                     status TEXT NOT NULL DEFAULT 'live',
                     is_free BOOLEAN NOT NULL DEFAULT FALSE,
+                    track TEXT NOT NULL DEFAULT 'sql',
+                    starter_code TEXT,
+                    function_signature TEXT,
+                    test_code TEXT,
+                    canonical_solution TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
@@ -101,6 +106,36 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE problems ADD COLUMN IF NOT EXISTS is_free BOOLEAN NOT NULL DEFAULT FALSE
             """)
+            # Migration: adds the Python practice track alongside the
+            # original SQL-only bank. `track` discriminates rows ('sql' vs
+            # 'python'); existing rows implicitly become 'sql'. The four
+            # Python-only columns stay nullable and unused on SQL rows,
+            # mirroring schema_sql/seed_sql/canonical_sql being unused on
+            # (future) non-SQL rows -- a single shared table extended with
+            # nullable columns, not a parallel table, since the bulk of the
+            # fields (id/title/difficulty/topic/tags/description/status/
+            # is_free/created_at) apply identically to both tracks.
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS track TEXT NOT NULL DEFAULT 'sql'
+            """)
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS starter_code TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS function_signature TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS test_code TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE problems ADD COLUMN IF NOT EXISTS canonical_solution TEXT
+            """)
+            # SQL-specific columns are meaningless for track='python' rows --
+            # relax NOT NULL (idempotent; no-ops once already dropped) so a
+            # Python problem insert doesn't need to fake empty-string SQL.
+            cur.execute("""ALTER TABLE problems ALTER COLUMN schema_sql DROP NOT NULL""")
+            cur.execute("""ALTER TABLE problems ALTER COLUMN seed_sql DROP NOT NULL""")
+            cur.execute("""ALTER TABLE problems ALTER COLUMN canonical_sql DROP NOT NULL""")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS content_cadence (
                     id INTEGER PRIMARY KEY DEFAULT 1,

@@ -31,6 +31,8 @@ import uuid
 import db
 import sandbox
 import topics
+import py_topics
+import pysandbox
 
 # Above this title-similarity ratio, a draft is treated as a near-duplicate
 # of an existing problem and rejected -- catches "Employees Earning More
@@ -2387,8 +2389,8 @@ def list_existing_titles() -> list[str]:
             return [row[0] for row in cur.fetchall()]
 
 
-def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, user_id: str | None = None):
-    query = "SELECT id, title, difficulty, topic, tags, is_free FROM problems WHERE status = 'live'"
+def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, user_id: str | None = None, track: str | None = None):
+    query = "SELECT id, title, difficulty, topic, tags, is_free, track FROM problems WHERE status = 'live'"
     params = []
     if difficulty:
         query += " AND difficulty = %s"
@@ -2396,6 +2398,9 @@ def list_problems_summary(difficulty: str | None = None, tag: str | None = None,
     if topic:
         query += " AND topic = %s"
         params.append(topic)
+    if track:
+        query += " AND track = %s"
+        params.append(track)
     query += " ORDER BY id"
 
     with db.get_conn() as conn:
@@ -2464,44 +2469,65 @@ class InvalidDraftProblem(Exception):
     pass
 
 
-def insert_pending_draft(draft: dict) -> str:
+def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     """
     Validates and stores one LLM-drafted problem as status='pending_review'
     -- never 'live' directly, a human always approves first. Raises
     InvalidDraftProblem (caller should skip the draft, not fail the whole
-    batch) if it's missing fields, targets a non-gradeable topic (i.e.
-    DML), or its canonical_sql doesn't pass the same read-only validation
-    every student submission goes through -- this is a code-level check
+    batch) if it's missing fields, targets a non-gradeable topic, or its
+    reference solution doesn't pass the same execution validation every
+    student submission goes through -- this is a code-level check
     independent of whether the model actually followed the prompt.
+
+    `track` picks which set of required fields/validation applies:
+    'sql' (schema_sql/seed_sql/canonical_sql, validated via sandbox.py's
+    read-only DuckDB check) or 'python' (starter_code/function_signature/
+    test_code/canonical_solution, validated via pysandbox.py's hosted
+    execution sandbox).
     """
-    required = ["title", "difficulty", "topic", "tags", "description", "schema_sql", "seed_sql", "canonical_sql", "order_matters"]
+    if track == "python":
+        required = ["title", "difficulty", "topic", "tags", "description", "starter_code", "function_signature", "test_code", "canonical_solution"]
+    else:
+        required = ["title", "difficulty", "topic", "tags", "description", "schema_sql", "seed_sql", "canonical_sql", "order_matters"]
     missing = [f for f in required if f not in draft]
     if missing:
         raise InvalidDraftProblem(f"Draft missing fields: {missing}")
 
-    if draft["topic"] not in topics.GRADEABLE_TOPICS:
-        raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic (DML problems aren't supported).")
+    gradeable_topics = py_topics.PY_GRADEABLE_TOPICS if track == "python" else topics.GRADEABLE_TOPICS
+    if draft["topic"] not in gradeable_topics:
+        raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic for track '{track}'.")
 
     for existing_title in list_existing_titles():
         ratio = difflib.SequenceMatcher(None, draft["title"].lower(), existing_title.lower()).ratio()
         if ratio >= DUPLICATE_TITLE_THRESHOLD:
             raise InvalidDraftProblem(f"Draft title '{draft['title']}' is too similar to existing problem '{existing_title}' ({ratio:.2f}).")
 
-    try:
-        sandbox.validate_student_sql(draft["canonical_sql"])
-    except sandbox.SqlValidationError as e:
-        raise InvalidDraftProblem(f"canonical_sql failed read-only validation: {e}")
+    if track == "python":
+        try:
+            result = pysandbox.run_python_submission(
+                student_code=draft["canonical_solution"],
+                test_code=draft["test_code"],
+            )
+        except Exception as e:
+            raise InvalidDraftProblem(f"canonical_solution failed to execute in the sandbox: {e}")
+        if not result["passed"]:
+            raise InvalidDraftProblem(f"canonical_solution did not pass its own test_code: {result['error']}")
+    else:
+        try:
+            sandbox.validate_student_sql(draft["canonical_sql"])
+        except sandbox.SqlValidationError as e:
+            raise InvalidDraftProblem(f"canonical_sql failed read-only validation: {e}")
 
-    # Also confirm it actually runs cleanly against its own schema/seed --
-    # catches drafts that are read-only-valid syntactically but broken.
-    try:
-        sandbox.compute_expected_output({
-            "schema_sql": draft["schema_sql"],
-            "seed_sql": draft["seed_sql"],
-            "canonical_sql": draft["canonical_sql"],
-        })
-    except Exception as e:
-        raise InvalidDraftProblem(f"canonical_sql failed to execute: {e}")
+        # Also confirm it actually runs cleanly against its own schema/seed --
+        # catches drafts that are read-only-valid syntactically but broken.
+        try:
+            sandbox.compute_expected_output({
+                "schema_sql": draft["schema_sql"],
+                "seed_sql": draft["seed_sql"],
+                "canonical_sql": draft["canonical_sql"],
+            })
+        except Exception as e:
+            raise InvalidDraftProblem(f"canonical_sql failed to execute: {e}")
 
     problem_id = f"generated-{uuid.uuid4().hex[:8]}"
     with db.get_conn() as conn:
@@ -2509,15 +2535,19 @@ def insert_pending_draft(draft: dict) -> str:
             cur.execute(
                 """
                 INSERT INTO problems
-                    (id, title, difficulty, topic, tags, description,
-                     schema_sql, seed_sql, canonical_sql, order_matters, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_review')
+                    (id, title, difficulty, topic, tags, description, track,
+                     schema_sql, seed_sql, canonical_sql, order_matters,
+                     starter_code, function_signature, test_code, canonical_solution,
+                     status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_review')
                 """,
                 (
                     problem_id, draft["title"], draft["difficulty"], draft["topic"],
-                    json.dumps(draft["tags"]), draft["description"].strip(),
-                    draft["schema_sql"], draft["seed_sql"], draft["canonical_sql"],
-                    bool(draft["order_matters"]),
+                    json.dumps(draft["tags"]), draft["description"].strip(), track,
+                    draft.get("schema_sql"), draft.get("seed_sql"), draft.get("canonical_sql"),
+                    bool(draft.get("order_matters", False)),
+                    draft.get("starter_code"), draft.get("function_signature"),
+                    draft.get("test_code"), draft.get("canonical_solution"),
                 ),
             )
     return problem_id
