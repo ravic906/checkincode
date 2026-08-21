@@ -145,7 +145,7 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
     }
 
 
-def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 0.6, **kwargs) -> dict:
+def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 0.6, rate_limit_delay_seconds: float = 5.0, **kwargs) -> dict:
     """
     Wraps _call_chat with a few retries for json_mode calls specifically --
     observed in practice to occasionally fail with a 400 from Groq's own
@@ -154,6 +154,12 @@ def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 
     transient generation hiccups rather than a real prompt problem (retrying
     the identical request has succeeded every time so far), so retry a
     couple of times before letting the error surface to the user.
+
+    A 429 (provider TPM rate limit) is a different kind of transient error
+    -- it needs several seconds for the token bucket to refill, not the
+    short delay above meant for generation hiccups, so it gets its own
+    longer backoff and retries regardless of json_mode (a rate limit hits
+    every call type, not just structured-output ones).
     """
     last_error = None
     for attempt in range(max_retries + 1):
@@ -161,9 +167,14 @@ def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 
             return _call_chat(**kwargs)
         except RuntimeError as e:
             last_error = e
-            if not kwargs.get("json_mode") or attempt == max_retries:
+            if attempt == max_retries:
                 raise
-            time.sleep(retry_delay_seconds)
+            if str(e).startswith("429"):
+                time.sleep(rate_limit_delay_seconds)
+            elif kwargs.get("json_mode"):
+                time.sleep(retry_delay_seconds)
+            else:
+                raise
     raise last_error
 
 
