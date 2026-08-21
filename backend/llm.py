@@ -682,17 +682,24 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int, exist
         {"role": "system", "content": PROBLEM_BATCH_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
-    # Groq's rate limiter reserves the full max_tokens as "requested" TPM
-    # up front, regardless of how much the model actually generates -- so
-    # a small batch asking for the same fixed 4000-token ceiling as a big
-    # one wastes headroom against the (fairly tight, free-tier) 8000 TPM
-    # cap. Scale the ceiling down for small batches instead.
-    result = _call_chat_with_retry(
-        user_id=user_id, problem_id="admin-problem-batch", messages=messages,
-        max_tokens=min(4000, max(800, count * 350)), json_mode=True,
-    )
-    parsed = _parse_json_reply(result["reply"])
-    return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+    # Scale the completion-token ceiling with batch size so a small batch
+    # isn't needlessly capped and a large one isn't cut off mid-JSON. The
+    # FAANG-calibrated prompt (richer schemas/seed data, trap-problem
+    # rationale baked into scenario design) produces noticeably longer
+    # per-problem output than the original prompt did, so the floor and
+    # per-problem multiplier here are both higher than what worked before.
+    last_parse_error = None
+    for attempt in range(3):
+        result = _call_chat_with_retry(
+            user_id=user_id, problem_id="admin-problem-batch", messages=messages,
+            max_tokens=min(8000, max(1500, count * 500)), json_mode=True,
+        )
+        try:
+            parsed = _parse_json_reply(result["reply"])
+            return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+        except (json.JSONDecodeError, KeyError) as e:
+            last_parse_error = e
+    raise RuntimeError(f"Model didn't return valid JSON after 3 attempts ({last_parse_error}).")
 
 
 PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT = (
