@@ -2434,6 +2434,41 @@ def record_submission(user_id: str, problem_id: str, correct: bool):
             )
 
 
+def _category_bucket(track: str, topic: str) -> str:
+    """Buckets a (track, topic) pair into one of the four content
+    categories shown on the admin dashboard's solved-by-category chart --
+    pandas/numpy are topic vocabularies within track='python' (see
+    data_lib_topics.py), not their own track, so distinguishing them
+    means checking topic, not just track."""
+    if track != "python":
+        return "sql"
+    if topic in data_lib_topics.DATA_LIBRARY_TOPICS:
+        return "pandas" if topic.startswith("Pandas") else "numpy"
+    return "python"
+
+
+def get_platform_solved_breakdown() -> dict:
+    """Distinct (user, problem) pairs with a correct submission, bucketed
+    into sql/python/pandas/numpy -- the platform-wide chart on the admin
+    Users page. Distinct so re-solving the same problem twice doesn't
+    double-count."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT s.user_id, s.problem_id, p.track, p.topic
+                FROM submissions s
+                JOIN problems p ON p.id = s.problem_id
+                WHERE s.correct = TRUE
+                """
+            )
+            rows = cur.fetchall()
+    counts = {"sql": 0, "python": 0, "pandas": 0, "numpy": 0}
+    for r in rows:
+        counts[_category_bucket(r["track"], r["topic"])] += 1
+    return counts
+
+
 def get_solved_problem_ids(user_id: str) -> set:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

@@ -39,6 +39,59 @@ function renderSummary(summary) {
   `;
 }
 
+// Category order/colors shared by the platform-wide chart and every
+// per-user breakdown -- pandas/numpy are topic buckets within
+// track='python', not separate tracks (see problems.py's
+// _category_bucket), so "category" here means content bucket, not the
+// `track` column.
+const CATEGORY_META = {
+  sql: { label: "SQL", color: "var(--accent)" },
+  python: { label: "Python", color: "var(--green)" },
+  pandas: { label: "Pandas", color: "var(--amber)" },
+  numpy: { label: "NumPy", color: "var(--red)" },
+};
+
+// Renders a small SVG pie chart from {sql, python, pandas, numpy} counts,
+// plus a text legend with each count. No charting library -- this is a
+// no-build-step frontend, and a handful of arcs is simple enough to
+// compute directly.
+function renderCategoryPie(counts, size = 120) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const r = size / 2;
+  const cx = r, cy = r;
+  let angle = -Math.PI / 2; // start at 12 o'clock
+  let slices = "";
+  if (total === 0) {
+    slices = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--panel-2)" />`;
+  } else {
+    for (const [key, meta] of Object.entries(CATEGORY_META)) {
+      const value = counts[key] || 0;
+      if (value === 0) continue;
+      const slice = (value / total) * Math.PI * 2;
+      const x1 = cx + r * Math.cos(angle);
+      const y1 = cy + r * Math.sin(angle);
+      angle += slice;
+      const x2 = cx + r * Math.cos(angle);
+      const y2 = cy + r * Math.sin(angle);
+      const largeArc = slice > Math.PI ? 1 : 0;
+      slices += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z" fill="${meta.color}" />`;
+    }
+  }
+  const legend = Object.entries(CATEGORY_META).map(([key, meta]) => `
+    <div class="legend-row">
+      <span class="legend-swatch" style="background:${meta.color};"></span>
+      <span>${meta.label}</span>
+      <span class="legend-count">${counts[key] || 0}</span>
+    </div>
+  `).join("");
+  return `
+    <div class="pie-chart-wrap">
+      <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Solved problems by category">${slices}</svg>
+      <div class="legend">${legend}</div>
+    </div>
+  `;
+}
+
 function renderUserRow(u) {
   const label = u.email || u.id;
   const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : "—";
@@ -53,6 +106,38 @@ function renderUserRow(u) {
       <td>${joined}</td>
     </tr>
   `;
+}
+
+// Buckets a submission-history row's (track, topic) the same way
+// problems.py's _category_bucket does server-side, so the per-user
+// drill-down chart matches the platform-wide one's categorization.
+const PANDAS_TOPICS = new Set([
+  "Pandas Data Cleaning & Missing Data",
+  "Pandas Merging, Joining & Reshaping",
+  "Pandas GroupBy & Aggregation",
+  "Pandas Time Series Operations",
+]);
+const NUMPY_TOPICS = new Set([
+  "NumPy Array Creation & Indexing",
+  "NumPy Broadcasting & Vectorization",
+  "NumPy Aggregations & Boolean Masking",
+]);
+function categoryBucket(track, topic) {
+  if (track !== "python") return "sql";
+  if (PANDAS_TOPICS.has(topic)) return "pandas";
+  if (NUMPY_TOPICS.has(topic)) return "numpy";
+  return "python";
+}
+
+function computeUserBreakdown(history) {
+  const solvedProblemIds = new Set();
+  const counts = { sql: 0, python: 0, pandas: 0, numpy: 0 };
+  for (const h of history) {
+    if (!h.correct || solvedProblemIds.has(h.problem_id)) continue;
+    solvedProblemIds.add(h.problem_id);
+    counts[categoryBucket(h.track, h.topic)]++;
+  }
+  return counts;
 }
 
 function renderHistoryRow(h) {
@@ -83,9 +168,11 @@ async function toggleHistory(userId, rowEl) {
   rowEl.parentNode.insertBefore(panel, rowEl.nextSibling);
   try {
     const data = await adminApi(`/api/admin/users/${encodeURIComponent(userId)}/history`);
-    panel.innerHTML = data.history.length
+    const breakdown = computeUserBreakdown(data.history);
+    const chartHtml = `<div class="user-breakdown-header">Solved by category</div>${renderCategoryPie(breakdown, 90)}`;
+    panel.innerHTML = chartHtml + (data.history.length
       ? data.history.map(renderHistoryRow).join("")
-      : `<p style="color:var(--muted);">No submissions yet.</p>`;
+      : `<p style="color:var(--muted);">No submissions yet.</p>`);
   } catch (err) {
     panel.innerHTML = `<div class="result-banner fail">${escapeHtml(err.message)}</div>`;
   }
@@ -97,11 +184,14 @@ async function loadUsers() {
   const cards = document.getElementById("summaryCards");
   body.innerHTML = `<tr><td colspan="7"><div class="loading-dots">Loading…</div></td></tr>`;
   try {
-    const [summary, usersResp] = await Promise.all([
+    const [summary, usersResp, breakdown] = await Promise.all([
       adminApi("/api/admin/users/summary"),
       adminApi("/api/admin/users"),
+      adminApi("/api/admin/stats/solved-by-category"),
     ]);
     cards.innerHTML = renderSummary(summary);
+    document.getElementById("categoryChart").innerHTML =
+      `<div class="chart-title">Solved problems, platform-wide</div>${renderCategoryPie(breakdown, 140)}`;
     body.innerHTML = usersResp.users.length
       ? usersResp.users.map(renderUserRow).join("")
       : `<tr><td colspan="7" style="color:var(--muted);">No users yet.</td></tr>`;

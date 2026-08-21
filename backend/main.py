@@ -743,6 +743,14 @@ def api_admin_users_summary(x_admin_token: str = Header(default=None)):
     return users_module.get_admin_summary()
 
 
+@app.get("/api/admin/stats/solved-by-category")
+def api_admin_solved_by_category(x_admin_token: str = Header(default=None)):
+    """Platform-wide solved-problem counts by category (sql/python/
+    pandas/numpy), for the chart at the top of the admin Users page."""
+    _require_admin(x_admin_token)
+    return problems_module.get_platform_solved_breakdown()
+
+
 @app.get("/api/admin/users")
 def api_admin_list_users(x_admin_token: str = Header(default=None)):
     _require_admin(x_admin_token)
