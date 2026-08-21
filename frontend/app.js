@@ -59,6 +59,20 @@ function updateAskPhoenixFabVisibility() {
     (_onPracticeScreen && currentProblem) ? "flex" : "none";
 }
 
+// Keeps ?track=&problem= in the URL in sync with what's on screen, purely
+// so a page refresh lands back where you were instead of always resetting
+// to the home screen (there's no other client-side routing in this
+// no-build-step frontend, so this is deliberately just the URL, not a
+// router library).
+function syncUrl(params) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  for (const [k, v] of Object.entries(params)) {
+    if (v) url.searchParams.set(k, v);
+  }
+  history.replaceState(null, "", url);
+}
+
 function showHome() {
   document.getElementById("homeScreen").style.display = "flex";
   document.getElementById("practiceLayout").style.display = "none";
@@ -68,6 +82,7 @@ function showHome() {
   updateAskPhoenixFabVisibility();
   closeAskPhoenix();
   if (window.stopInterviewAudio) window.stopInterviewAudio();
+  syncUrl({});
 }
 function _resetPracticeWorkspace() {
   // Switching tracks (SQL <-> Python) while a problem was loaded would
@@ -90,8 +105,10 @@ function showSqlTrack() {
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
+  populateTopicFilter();
   populateTagFilter();
   renderProblemList();
+  syncUrl({ track: "sql" });
 }
 function showPythonTrack() {
   currentTrack = "python";
@@ -102,8 +119,10 @@ function showPythonTrack() {
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
+  populateTopicFilter();
   populateTagFilter();
   renderProblemList();
+  syncUrl({ track: "python" });
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
@@ -211,6 +230,7 @@ function renderTopicFilterBanner() {
   banner.innerHTML = `<span>Filtered: ${escapeHtml(activeTopicFilter)}</span><button id="clearTopicFilterBtn">Clear ✕</button>`;
   document.getElementById("clearTopicFilterBtn").onclick = () => {
     activeTopicFilter = null;
+    document.getElementById("topicFilter").value = "";
     renderProblemList();
   };
 }
@@ -218,6 +238,7 @@ function renderTopicFilterBanner() {
 function filterProblemsByTopic(topicName) {
   activeTopicFilter = topicName;
   showSqlTrack();
+  document.getElementById("topicFilter").value = topicName;
   renderProblemList();
 }
 window.filterProblemsByTopic = filterProblemsByTopic;
@@ -269,6 +290,25 @@ function populateTagFilter() {
     opt.textContent = t;
     select.appendChild(opt);
   });
+}
+
+// Separate from the tag filter (individual free-form labels like "trap" or
+// "grouping") -- this is the problem's actual topic (e.g. "NumPy
+// Aggregations & Boolean Masking"), which is what makes pandas/numpy
+// problems discoverable as their own category within the Python track
+// instead of being scattered through one long flat tag list.
+function populateTopicFilter() {
+  const topicSet = new Set();
+  allProblems.filter(p => (p.track || "sql") === currentTrack).forEach(p => topicSet.add(p.topic));
+  const select = document.getElementById("topicFilter");
+  select.innerHTML = `<option value="">All topics</option>`;
+  [...topicSet].sort().forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    select.appendChild(opt);
+  });
+  select.value = activeTopicFilter || "";
 }
 
 function renderTable(name, table) {
@@ -480,6 +520,7 @@ async function loadProblem(id) {
   askPhoenixConversation = [];
   renderProblemList();
   updateAskPhoenixFabVisibility();
+  syncUrl({ track: currentTrack, problem: id });
 
   if (p.track === "python") {
     document.getElementById("workspace").innerHTML = `
@@ -777,6 +818,7 @@ async function init() {
   const problemsRes = await api("/api/problems");
   allProblems = problemsRes.problems;
   await refreshTierBadge();
+  populateTopicFilter();
   populateTagFilter();
   renderProblemList();
 
@@ -799,6 +841,10 @@ async function init() {
   }
 
   document.getElementById("difficultyFilter").onchange = renderProblemList;
+  document.getElementById("topicFilter").onchange = () => {
+    activeTopicFilter = document.getElementById("topicFilter").value || null;
+    renderProblemList();
+  };
   document.getElementById("tagFilter").onchange = renderProblemList;
   document.getElementById("accessFilter").onchange = renderProblemList;
   document.getElementById("solvedFilter").onchange = renderProblemList;
@@ -825,7 +871,22 @@ async function init() {
     if (window.renderInterviewSetup) window.renderInterviewSetup();
   };
 
-  showHome();
+  // Restore whatever track/problem was in the URL (see syncUrl()) so a
+  // page refresh lands back where you were instead of always resetting
+  // to the home screen.
+  const restoreParams = new URLSearchParams(window.location.search);
+  const savedTrack = restoreParams.get("track");
+  const savedProblem = restoreParams.get("problem");
+  if (savedTrack === "python") {
+    showPythonTrack();
+  } else if (savedTrack === "sql") {
+    showSqlTrack();
+  } else {
+    showHome();
+  }
+  if (savedProblem) {
+    await loadProblem(savedProblem);
+  }
 }
 
 init();
