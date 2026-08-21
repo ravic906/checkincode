@@ -25,6 +25,7 @@ would silently drift out of sync with itself after the day changes.
 """
 
 import difflib
+import re
 import json
 import uuid
 
@@ -2513,7 +2514,29 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     else:
         gradeable_topics = topics.GRADEABLE_TOPICS
     if draft["topic"] not in gradeable_topics:
-        raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic for track '{track}'.")
+        # The model reliably paraphrases compound topic names (e.g.
+        # "Numbers, Dates, and Times" drifting to just "Numbers" or
+        # "Dates and Times") despite being given the exact string to use.
+        # Snap to a known topic when every significant word in the draft's
+        # topic is contained in exactly one candidate -- word-subset
+        # rather than character-similarity, since short fragments like
+        # "Numbers" score poorly against a long compound topic under
+        # difflib's ratio even though the match is semantically exact.
+        # A genuinely made-up topic (e.g. a domain name like "e-commerce"
+        # that leaked into this field) shares no words with any real
+        # topic and still gets rejected; two real-but-distinct topics
+        # (e.g. "Regression Fundamentals" vs "Probability Fundamentals")
+        # don't share their whole word set either, so this can't conflate
+        # them the way a similarity-ratio threshold risked doing.
+        stopwords = {"and", "with", "the", "of", "a", "an", "&"}
+        def _words(s):
+            return {w for w in re.findall(r"[a-z]+", s.lower()) if w not in stopwords}
+        draft_words = _words(draft["topic"])
+        matches = [c for c in gradeable_topics if draft_words and draft_words.issubset(_words(c))]
+        if len(matches) == 1:
+            draft["topic"] = matches[0]
+        else:
+            raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic for track '{track}'.")
 
     for existing_title in list_existing_titles():
         ratio = difflib.SequenceMatcher(None, draft["title"].lower(), existing_title.lower()).ratio()
