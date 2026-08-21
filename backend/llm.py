@@ -127,7 +127,7 @@ def _log_usage(entry: dict):
         f.write(json.dumps(entry) + "\n")
 
 
-def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 500, json_mode: bool = False) -> dict:
+def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_tokens: int = 500, json_mode: bool = False, timeout: int = 30) -> dict:
     """
     Shared low-level call: posts `messages` to the configured
     OpenAI-compatible chat completions endpoint, logs usage, and returns
@@ -163,7 +163,7 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
             "Content-Type": "application/json",
         },
         json=payload,
-        timeout=30,
+        timeout=timeout,
     )
     if not resp.ok:
         raise RuntimeError(f"{resp.status_code} error from LLM provider: {resp.text[:500]}")
@@ -693,6 +693,7 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int, exist
         result = _call_chat_with_retry(
             user_id=user_id, problem_id="admin-problem-batch", messages=messages,
             max_tokens=min(8000, max(1500, count * 500)), json_mode=True,
+            timeout=120,
         )
         try:
             parsed = _parse_json_reply(result["reply"])
@@ -1017,6 +1018,7 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
         result = _call_chat_with_retry(
             user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
             max_tokens=min(6000, max(1500, count * 600)), json_mode=False,
+            timeout=120,
         )
         try:
             parsed = _parse_json_reply(result["reply"])
