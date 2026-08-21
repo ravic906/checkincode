@@ -526,7 +526,7 @@ async function loadProblem(id) {
     document.getElementById("workspace").innerHTML = `
       <div class="problem-header">
         <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
-        <p>${escapeHtml(p.description)}</p>
+        <div class="problem-description markdown-content">${renderMarkdown(p.description)}</div>
       </div>
       <div class="editor-section">
         <div class="editor-toolbar">
@@ -549,7 +549,7 @@ async function loadProblem(id) {
     document.getElementById("workspace").innerHTML = `
       <div class="problem-header">
         <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
-        <p>${escapeHtml(p.description)}</p>
+        <div class="problem-description markdown-content">${renderMarkdown(p.description)}</div>
       </div>
       <div class="tables-section">
         <h3>Schema</h3>
