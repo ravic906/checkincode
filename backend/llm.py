@@ -206,7 +206,9 @@ PERSONA_TONE = {
     "strict": (
         "Adopt a terse, no-frills tone typical of a tough technical panel "
         "round -- minimal encouragement, move on quickly from vague "
-        "answers, press harder on follow-ups.\n\n"
+        "answers, press harder on follow-ups. Still stay composed and "
+        "professional throughout -- terse and demanding, never rude, "
+        "impatient, or dismissive.\n\n"
     ),
 }
 
@@ -255,6 +257,11 @@ def _interview_system_prompt(
         "question at a time, in natural spoken language -- no markdown, no "
         "bullet points, no code blocks, since your question will be read "
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
+        "Maintain a gentle, calm, patient demeanor throughout, regardless "
+        "of persona below -- interviews are stressful enough for the "
+        "candidate. Never sound rushed, impatient, or dismissive, even "
+        "when correcting a wrong answer or moving on from one they "
+        "couldn't answer.\n\n"
         "Before asking your next question (in that same `question` field, "
         "since that's the only thing spoken aloud), open with a brief, "
         "natural acknowledgment of what the candidate just said -- e.g. "
@@ -294,9 +301,12 @@ def _interview_system_prompt(
         "- probe: their answer was solid and there is room to go deeper on "
         "the SAME topic (edge cases, performance, trade-offs, real-world "
         "scenarios).\n"
-        "- switch_topic: their answer was sufficient, or they are clearly "
-        "stuck after a follow-up/probe already -- move to a new topic from "
-        "the list above that has not been covered yet.\n\n"
+        "- switch_topic: their answer was sufficient, they are clearly "
+        "stuck after a follow-up/probe already, OR their answer is a "
+        "genuine non-attempt like \"I don't know\" (see candidate_stuck "
+        "below) -- a real interviewer moves on right away after someone "
+        "gives up, they don't ask the same thing again. Move to a new "
+        "topic from the list above that has not been covered yet.\n\n"
         "Only ask about SQL, databases, and data engineering concepts. If "
         "the candidate goes off-topic, gently redirect back to the "
         "interview.\n\n"
