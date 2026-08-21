@@ -31,6 +31,8 @@ services:
         sync: false
       - key: STT_API_KEY
         sync: false
+      - key: JUDGE0_API_KEY
+        sync: false
 
   - type: web
     name: sql-practice-frontend
