@@ -526,6 +526,22 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             forced_topic=forced_topic,
             persona=session["persona"],
         )
+        if result.get("candidate_stuck") and result["action"] != "switch_topic":
+            # A real interviewer moves on after ONE clear "I don't know" --
+            # they don't rephrase and ask again. Immediately re-run with a
+            # forced switch rather than deferring to next turn, so the
+            # candidate never sees a same-topic rephrase after a genuine
+            # non-answer.
+            result = llm.interview_turn(
+                user_id=user_id,
+                topics=interview.GENERIC_TOPICS,
+                resume_text=session["resume_text"],
+                conversation=session["conversation"],
+                current_topic=session["current_topic"],
+                topic_turn_count=session["current_topic_turns"],
+                forced_topic=interview.next_topic(session, interview.GENERIC_TOPICS),
+                persona=session["persona"],
+            )
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a
         # transient failure doesn't leave a duplicate in the transcript.
