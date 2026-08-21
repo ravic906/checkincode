@@ -737,6 +737,21 @@ def api_admin_list_pending(x_admin_token: str = Header(default=None)):
     return {"problems": problems_module.list_pending_problems()}
 
 
+@app.get("/api/admin/problems/{problem_id}")
+def api_admin_get_problem(problem_id: str, x_admin_token: str = Header(default=None)):
+    """
+    Full problem detail (any status, bypassing the Pro-tier paywall) for
+    content-quality review -- e.g. auditing the live bank for duplicate/
+    overlapping concepts. Unlike GET /api/problems/{problem_id}, this
+    never checks is_free/tier since it's admin-only.
+    """
+    _require_admin(x_admin_token)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    return p
+
+
 @app.post("/api/admin/problems/{problem_id}/approve")
 def api_admin_approve(problem_id: str, x_admin_token: str = Header(default=None)):
     _require_admin(x_admin_token)
