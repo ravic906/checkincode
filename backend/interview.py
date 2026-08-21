@@ -134,11 +134,19 @@ def remove_last_turn(session: dict):
         save_session(session)
 
 
-def update_topic_tracking(session: dict, action: str, topic: str):
+def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuck: bool = False):
     """
     Tracks how many consecutive question-turns have been spent on the
     current topic, so callers can enforce MAX_TURNS_PER_TOPIC deterministically
     rather than relying on the model to police its own turn budget.
+
+    `candidate_stuck` (the model's read on whether the answer just given was
+    a genuine non-attempt, e.g. "I don't know") gets the same deterministic
+    treatment: if true, the turn counter is maxed out so the topic is forced
+    to switch on the very next turn, regardless of what action the model
+    picked for THIS turn -- it's been observed to keep picking follow_up and
+    re-asking a near-identical question rather than switching after a clear
+    non-answer, same class of unreliability as the turn-budget itself.
     """
     if action == "switch_topic" or session["current_topic"] is None:
         session["current_topic"] = topic
@@ -147,6 +155,8 @@ def update_topic_tracking(session: dict, action: str, topic: str):
             session["topics_covered"].append(topic)
     else:
         session["current_topic_turns"] += 1
+        if candidate_stuck:
+            session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
     save_session(session)
 
 

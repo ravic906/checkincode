@@ -316,9 +316,16 @@ def _interview_system_prompt(
         "Wait for their next answer before asking anything new. Never just "
         "repeat your previous question verbatim, though -- vary your "
         "wording.\n\n"
+        "Set `candidate_stuck` to true when their most recent answer was a "
+        "genuine non-attempt -- \"I don't know\", \"I'm not sure\", \"no "
+        "idea\", or similar giving-up, as opposed to a wrong-but-attempted "
+        "answer. This is tracked separately from your action/topic choice "
+        "and used to force a topic change even if you pick follow_up, so "
+        "set it honestly regardless of what action you choose.\n\n"
         "Respond with ONLY a JSON object, no other text, no markdown code "
         'fences: {"action": "follow_up"|"probe"|"switch_topic", "topic": '
         '"<topic name>", "question": "<your next spoken question>", '
+        '"candidate_stuck": true|false, '
         '"table_context": null | {"table_name": "<name>", "schema": '
         '"<CREATE TABLE ... statement as one line>", "sample_rows": '
         '"<a small markdown table of 3-6 example rows, columns separated '
@@ -380,6 +387,7 @@ def interview_turn(
             "topic": forced_topic or parsed.get("topic", topics[0]),
             "question": parsed["question"],
             "table_context": parsed.get("table_context"),
+            "candidate_stuck": bool(parsed.get("candidate_stuck", False)),
             "usage": result["usage"],
         }
     except (json.JSONDecodeError, KeyError):
@@ -388,6 +396,7 @@ def interview_turn(
             "topic": forced_topic or topics[0],
             "question": result["reply"],
             "table_context": None,
+            "candidate_stuck": False,
             "usage": result["usage"],
         }
 

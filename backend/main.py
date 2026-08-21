@@ -533,7 +533,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
         raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
 
     interview.record_turn(session, "assistant", result["question"], result["topic"])
-    interview.update_topic_tracking(session, result["action"], result["topic"])
+    interview.update_topic_tracking(session, result["action"], result["topic"], result.get("candidate_stuck", False))
     interview.set_last_table_context(session, result["table_context"])
 
     return {
