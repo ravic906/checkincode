@@ -657,6 +657,12 @@ PROBLEM_BATCH_SYSTEM_PROMPT = (
     "- Any date-based problem must use fixed literal dates (e.g. DATE "
     "'2024-07-15'), never CURRENT_DATE/NOW(), since the expected output "
     "is cached once and must stay correct indefinitely.\n\n"
+    "Worked example of the domain/topic distinction: a healthcare-domain "
+    "problem about patients with no recent appointments still has "
+    "\"topic\": \"Advanced Searching\" (a real value from the given "
+    "topics list) -- NEVER \"topic\": \"Healthcare\" or \"topic\": "
+    "\"healthcare\", which are domain names, not topics, and will be "
+    "rejected outright.\n\n"
     "Respond with ONLY a JSON object, no other text, no markdown code "
     'fences: {"problems": [{"title": "...", "difficulty": '
     '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
@@ -808,6 +814,12 @@ PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT = (
     "-- no real network calls, no real file writes outside what the "
     "problem itself is about, no subprocess/os-level calls -- pure "
     "input-to-output logic only.\n\n"
+    "Worked example of the domain/topic distinction: a healthcare-domain "
+    "problem about deduplicating patient records still has \"topic\": "
+    "\"Data Structures and Algorithms\" (a real value from the given "
+    "topics list) -- NEVER \"topic\": \"Healthcare\" or \"topic\": "
+    "\"healthcare\", which are domain names, not topics, and will be "
+    "rejected outright.\n\n"
     "Respond with ONLY a JSON object, no other text, no markdown code "
     'fences: {"problems": [{"title": "...", "difficulty": '
     '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
@@ -889,6 +901,12 @@ STATS_PYTHON_BATCH_SYSTEM_PROMPT = (
     "normal cases and at least one edge case. `canonical_solution` is a "
     "full, correct implementation that passes every assertion -- never "
     "shown to students, only used to validate the problem itself.\n\n"
+    "Worked example of the domain/topic distinction: a healthcare-domain "
+    "problem about a confidence interval for readmission rates still has "
+    "\"topic\": \"Confidence Intervals & Estimation\" (a real value from "
+    "the given topics list) -- NEVER \"topic\": \"Healthcare\" or "
+    "\"topic\": \"healthcare\", which are domain names, not topics, and "
+    "will be rejected outright.\n\n"
     "Respond with ONLY a JSON object, no other text, no markdown code "
     'fences: {"problems": [{"title": "...", "difficulty": '
     '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
@@ -987,6 +1005,12 @@ DATA_LIB_PYTHON_BATCH_SYSTEM_PROMPT = (
     "boolean in these libraries. `canonical_solution` is a full, correct "
     "implementation that passes every assertion -- never shown to "
     "students, only used to validate the problem itself.\n\n"
+    "Worked example of the domain/topic distinction: a healthcare-domain "
+    "problem about grouping patient visits still has \"topic\": "
+    "\"Pandas GroupBy & Aggregation\" (a real value from the given "
+    "topics list) -- NEVER \"topic\": \"Healthcare\" or \"topic\": "
+    "\"healthcare\", which are domain names, not topics, and will be "
+    "rejected outright.\n\n"
     "Respond with ONLY a JSON object, no other text, no markdown code "
     'fences: {"problems": [{"title": "...", "difficulty": '
     '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
