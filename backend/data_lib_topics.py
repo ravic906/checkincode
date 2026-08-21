@@ -5,6 +5,12 @@ Cookbook taxonomy since these are a distinct, data-analyst-specific
 skill area (DataFrame/array manipulation) rather than general-purpose
 Python language features.
 
+Modeled on the relevant chapters of "Python for Data Analysis" (McKinney)
+-- the standard reference for both libraries together -- same way
+py_topics.py is modeled on the Python Cookbook. Only the gradeable,
+computational chapters are represented (plotting/visualization and
+modeling-library chapters are out of scope -- not assert-testable).
+
 Same mechanism as stats_topics.py: not a track of its own, just a topic
 vocabulary accepted for track='python' drafts alongside
 py_topics.PY_GRADEABLE_TOPICS, graded by the exact same E2B execution
@@ -13,6 +19,11 @@ libraries pre-installed by default.
 """
 
 DATA_LIBRARY_TOPICS = [
-    "Pandas DataFrames",
-    "NumPy Arrays",
+    "NumPy Array Creation & Indexing",
+    "NumPy Broadcasting & Vectorization",
+    "NumPy Aggregations & Boolean Masking",
+    "Pandas Data Cleaning & Missing Data",
+    "Pandas Merging, Joining & Reshaping",
+    "Pandas GroupBy & Aggregation",
+    "Pandas Time Series Operations",
 ]
