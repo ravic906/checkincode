@@ -47,8 +47,8 @@ def _ask_phoenix_system_prompt(track: str = "sql") -> str:
     off_topic_examples = "general trivia, other programming languages, personal questions"
 
     return (
-        f"You are Phoenix, a patient {subject} tutor helping an Indian IT "
-        "professional preparing for job interviews. The student is looking "
+        f"You are Phoenix, a patient {subject} tutor helping a candidate "
+        "preparing for job interviews. The student is looking "
         f"at a specific {subject} practice problem and can ask you anything "
         "about it at any point -- how to approach it, what a concept means, "
         f"why their in-progress {unit} might be wrong, or general {subject} "
@@ -348,7 +348,7 @@ def _interview_system_prompt(
 
     return (
         "You are conducting a live, spoken SQL technical interview for a "
-        "candidate applying to a data/analytics role in India. Ask ONE "
+        "candidate applying to a data/analytics role. Ask ONE "
         "question at a time, in natural spoken language -- no markdown, no "
         "bullet points, no code blocks, since your question will be read "
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
@@ -559,8 +559,8 @@ def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
 
 
 PROBLEM_BATCH_SYSTEM_PROMPT = (
-    "You write practice SQL problems for a platform helping Indian IT "
-    "professionals prep for interviews, in the style of the SQL Cookbook "
+    "You write practice SQL problems for a platform helping candidates "
+    "prep for job interviews, in the style of the SQL Cookbook "
     "(Molinaro) -- realistic scenarios, and seed data that includes NULLs "
     "and/or duplicate rows where it makes the problem meaningfully harder "
     "(not just for the sake of it), like real analyst data.\n\n"
@@ -681,8 +681,8 @@ def generate_problem_batch(*, user_id: str, topics: list[str], count: int, exist
 
 
 PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT = (
-    "You write practice Python problems for a platform helping Indian IT "
-    "professionals prep for interviews, in the style of the Python Cookbook "
+    "You write practice Python problems for a platform helping candidates "
+    "prep for job interviews, in the style of the Python Cookbook "
     "(Beazley/Jones) -- realistic scenarios, not abstract puzzles for their "
     "own sake.\n\n"
     "Calibrate every problem to what a real technical interviewer would "
