@@ -489,9 +489,11 @@ async def api_interview_stt(file: UploadFile = File(...), x_user_id: str = Heade
 @app.post("/api/interview/answer")
 def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
-    u = users_module.get_usage(user_id)
-    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
-
+    # No _require_paid_or_trial() re-check here: mark_interview_trial_used()
+    # already flips interview_trial_used=True at /start, so re-checking it
+    # here would 402 every trial user on their very first answer. Session
+    # ownership (below) is the correct, sufficient gate for continuing a
+    # session that was already validly started.
     session = interview.get_session(req.session_id)
     if not session or session["user_id"] != user_id:
         raise HTTPException(404, "Interview session not found")
