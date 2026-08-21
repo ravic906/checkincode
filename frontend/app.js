@@ -273,6 +273,75 @@ function renderMarkdownInline(s) {
     .replace(/(?<![*\w])\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
 }
 
+// Collects a possibly-"loose" list starting at line `i`: items can contain
+// trailing paragraphs and fenced code blocks (common in real model output --
+// e.g. a numbered step followed by an explanation and a code snippet before
+// the next number), not just a single line each. Without this, each
+// marker line separated by other content became its own one-item list,
+// so every step displayed as "1." instead of counting up.
+function collectListItems(lines, i, markerRe) {
+  const itemsRaw = [];
+  let current = null;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (markerRe.test(line)) {
+      if (current) itemsRaw.push(current);
+      current = [line.replace(markerRe, "")];
+      i++;
+      continue;
+    }
+    if (/^```/.test(line.trim())) {
+      const fence = [line];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) {
+        fence.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) { fence.push(lines[i]); i++; }
+      if (current) current.push(...fence);
+      continue;
+    }
+    const isHeader = /^#{1,4}\s/.test(line);
+    const isTableStart = /^\s*\|.*\|\s*$/.test(line) && lines[i + 1] && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]);
+    if (isHeader || isTableStart) break;
+
+    if (line.trim() === "") {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j >= lines.length || /^#{1,4}\s/.test(lines[j])) { i = j; break; }
+      if (markerRe.test(lines[j]) || /^```/.test(lines[j].trim())) {
+        // List (or a code block belonging to the current item) resumes
+        // right after the gap -- skip the blank lines and let the next
+        // loop iteration handle the marker/fence normally.
+        i = j;
+        continue;
+      }
+      // Some other content follows (prose, or a different list type).
+      // Only treat it as a continuation of the CURRENT item if the list
+      // resumes again afterward -- otherwise this is content that comes
+      // AFTER the list ends, and must not get swallowed into the last
+      // item just because a blank line preceded it.
+      let k = j;
+      while (k < lines.length && lines[k].trim() !== "" && !markerRe.test(lines[k]) && !/^```/.test(lines[k].trim()) && !/^#{1,4}\s/.test(lines[k])) k++;
+      let m = k;
+      while (m < lines.length && lines[m].trim() === "") m++;
+      if (current && m < lines.length && markerRe.test(lines[m])) {
+        current.push("", ...lines.slice(j, k));
+        i = k;
+        continue;
+      }
+      i = j;
+      break;
+    }
+
+    if (!current) break; // non-blank, non-marker line with no active item -- not part of this list
+    current.push(line);
+    i++;
+  }
+  if (current) itemsRaw.push(current);
+  return { itemsRaw, nextIndex: i };
+}
+
 function renderMarkdown(text) {
   const lines = String(text).replace(/\r\n/g, "\n").split("\n");
   const htmlBlocks = [];
@@ -320,23 +389,22 @@ function renderMarkdown(text) {
       continue;
     }
 
-    if (/^\s*[-*+]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*[-*+]\s+/, ""));
-        i++;
-      }
-      htmlBlocks.push("<ul>" + items.map(it => `<li>${renderMarkdownInline(it)}</li>`).join("") + "</ul>");
-      continue;
-    }
-
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
-        i++;
-      }
-      htmlBlocks.push("<ol>" + items.map(it => `<li>${renderMarkdownInline(it)}</li>`).join("") + "</ol>");
+    if (/^\s*[-*+]\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      const markerRe = ordered ? /^\s*\d+\.\s+/ : /^\s*[-*+]\s+/;
+      const { itemsRaw, nextIndex } = collectListItems(lines, i, markerRe);
+      const itemsHtml = itemsRaw.map(raw => {
+        // Single-line items render inline (keeps simple bullets compact);
+        // items with continuation content (a paragraph or code block that
+        // followed on the next lines, before the next marker) render
+        // through the full block renderer so that content isn't lost.
+        const body = raw.join("\n").trim();
+        return raw.length === 1
+          ? `<li>${renderMarkdownInline(raw[0])}</li>`
+          : `<li>${renderMarkdown(body)}</li>`;
+      }).join("");
+      htmlBlocks.push(ordered ? `<ol>${itemsHtml}</ol>` : `<ul>${itemsHtml}</ul>`);
+      i = nextIndex;
       continue;
     }
 
