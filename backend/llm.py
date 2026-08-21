@@ -1034,7 +1034,16 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
     separate generation function, just a different prompt over the same
     "write a Python function + assert-based tests" contract.
     """
+    is_default_prompt = system_prompt is None
     system_prompt = system_prompt or PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT
+    # pandas/numpy (and stats problems reaching for them) have much more
+    # fragile self-consistency than general Python -- DataFrame/array
+    # equality is sensitive to float rounding, dtype (int32 vs int64),
+    # and index alignment in ways a plain Python assert never has to
+    # worry about, so the same 0.75 that works for general Python
+    # produced a much higher canonical_solution-fails-its-own-test rate
+    # here. Lower temperature for anything other than the default prompt.
+    batch_temperature = 0.75 if is_default_prompt else 0.5
     user_prompt = (
         f"Draft {count} new practice problems spread across these topics "
         f"(cover each at least once if count allows): {', '.join(topics)}.\n"
@@ -1089,7 +1098,7 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
             # code (the model's own solution failing its own asserts)
             # without a corresponding gain in scenario variety worth that
             # trade for code correctness the way it was for SQL scenarios.
-            timeout=120, temperature=0.75,
+            timeout=120, temperature=batch_temperature,
         )
         try:
             parsed = _parse_json_reply(result["reply"])
