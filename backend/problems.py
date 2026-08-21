@@ -2490,7 +2490,15 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     if track == "python":
         required = ["title", "difficulty", "topic", "tags", "description", "starter_code", "function_signature", "test_code", "canonical_solution"]
     else:
-        required = ["title", "difficulty", "topic", "tags", "description", "schema_sql", "seed_sql", "canonical_sql", "order_matters"]
+        # order_matters is deliberately not required here -- GPT-4o-mini
+        # reliably omits it in larger batches despite the prompt asking
+        # for it, and the insert step below already defaults a missing
+        # value to False (multiset comparison), which is the safe
+        # default: it can never falsely reject a correctly-ordered
+        # answer, it can only be too lenient on order for the rare
+        # problem that actually needs strict ordering -- worth losing to
+        # stop rejecting entire otherwise-valid drafts over one field.
+        required = ["title", "difficulty", "topic", "tags", "description", "schema_sql", "seed_sql", "canonical_sql"]
     missing = [f for f in required if f not in draft]
     if missing:
         raise InvalidDraftProblem(f"Draft missing fields: {missing}")
