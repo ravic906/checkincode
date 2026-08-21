@@ -259,6 +259,104 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Minimal markdown-to-HTML for chat answers (Ask Phoenix, mock-interview
+// feedback text) -- operates on already-escaped text throughout, so
+// entities in the model's own output can never become real tags. Handles
+// just what a tutoring answer actually uses: headers, bold/italic/inline
+// code, fenced code blocks, tables, and ordered/unordered lists. Not a
+// full CommonMark implementation on purpose -- this is a chat bubble, not
+// a document renderer.
+function renderMarkdownInline(s) {
+  return escapeHtml(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(?<![*\w])\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+}
+
+function renderMarkdown(text) {
+  const lines = String(text).replace(/\r\n/g, "\n").split("\n");
+  const htmlBlocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line.trim())) {
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) {
+        code.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence
+      htmlBlocks.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    const headerMatch = line.match(/^(#{1,4})\s+(.*)/);
+    if (headerMatch) {
+      const level = Math.min(headerMatch[1].length + 3, 6); // ## -> h5, ### -> h6, keeps chat-scale
+      htmlBlocks.push(`<h${level}>${renderMarkdownInline(headerMatch[2])}</h${level}>`);
+      i++;
+      continue;
+    }
+
+    if (/^\s*\|.*\|\s*$/.test(line) && lines[i + 1] && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
+      const parseRow = row => row.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+      const headerCells = parseRow(line);
+      i += 2; // header + separator
+      const bodyRows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        bodyRows.push(parseRow(lines[i]));
+        i++;
+      }
+      htmlBlocks.push(
+        "<table><thead><tr>" +
+        headerCells.map(c => `<th>${renderMarkdownInline(c)}</th>`).join("") +
+        "</tr></thead><tbody>" +
+        bodyRows.map(r => "<tr>" + r.map(c => `<td>${renderMarkdownInline(c)}</td>`).join("") + "</tr>").join("") +
+        "</tbody></table>"
+      );
+      continue;
+    }
+
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ""));
+        i++;
+      }
+      htmlBlocks.push("<ul>" + items.map(it => `<li>${renderMarkdownInline(it)}</li>`).join("") + "</ul>");
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+        i++;
+      }
+      htmlBlocks.push("<ol>" + items.map(it => `<li>${renderMarkdownInline(it)}</li>`).join("") + "</ol>");
+      continue;
+    }
+
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    const para = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() !== "" && !/^(```|#{1,4}\s|\s*[-*+]\s|\s*\d+\.\s|\s*\|.*\|\s*$)/.test(lines[i])) {
+      para.push(lines[i]);
+      i++;
+    }
+    htmlBlocks.push(`<p>${renderMarkdownInline(para.join(" "))}</p>`);
+  }
+
+  return htmlBlocks.join("");
+}
+
 function showUpsell() {
   currentProblem = null;
   updateAskPhoenixFabVisibility();
@@ -463,7 +561,7 @@ function renderAskPhoenixThread() {
   thread.innerHTML = askPhoenixConversation.map(t => `
     <div class="followup-turn ${t.role}">
       <div class="who">${t.role === "user" ? "You" : "Phoenix"}</div>
-      ${escapeHtml(t.content)}
+      ${t.role === "user" ? `<p>${escapeHtml(t.content)}</p>` : renderMarkdown(t.content)}
     </div>
   `).join("");
   thread.scrollTop = thread.scrollHeight;

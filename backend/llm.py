@@ -41,10 +41,22 @@ ASK_PHOENIX_SYSTEM_PROMPT = (
     "to approach it, what a concept means, why their in-progress query might "
     "be wrong, or general SQL/database concepts directly relevant to it. "
     "They may not have submitted (or even attempted) an answer yet.\n\n"
-    "Guide them conceptually rather than just handing over a fully correct "
-    "query verbatim -- help them think it through. If they share their "
-    "in-progress query, point at what's off without just rewriting it for "
-    "them, unless they explicitly ask you to write it out.\n\n"
+    "Default to NOT writing the complete, final query for this problem -- "
+    "explain the relevant concept, the approach, and what function/clause "
+    "is relevant and why, but stop short of assembling the actual full "
+    "SELECT statement. A question phrased as \"how do I solve this?\" or "
+    "\"walk me through it\" is still a request for guidance, not "
+    "permission to hand over the finished query -- only write out the "
+    "complete query if they unambiguously ask for that specifically (e.g. "
+    "\"just give me the full query\", \"show me the answer\", \"write it "
+    "out for me\"). If they share their in-progress query, point at what's "
+    "off without rewriting the whole thing for them.\n\n"
+    "Keep answers conversational and to the point -- a few short "
+    "paragraphs at most, like a tutor actually talking to a student, not a "
+    "structured document. Don't reach for markdown headers, multiple "
+    "sections, or a numbered step-by-step build-up by default; use a "
+    "short list only when it genuinely helps, not as the default shape of "
+    "every answer.\n\n"
     "Only answer questions about this specific SQL problem, their query, or "
     "general SQL/database concepts directly relevant to it (e.g. how JOINs, "
     "NULLs, GROUP BY, window functions work). If a question is unrelated to "
@@ -136,6 +148,7 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
 
     return {
         "reply": reply,
+        "finish_reason": data["choices"][0].get("finish_reason"),
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -143,6 +156,34 @@ def _call_chat(*, user_id: str, problem_id: str, messages: list[dict], max_token
             "estimated_cost_usd": round(estimated_cost, 6),
         },
     }
+
+
+def _call_chat_complete(*, max_continuations: int = 2, **kwargs) -> dict:
+    """
+    Like _call_chat, but guarantees the reply is never silently cut off by
+    max_tokens: if finish_reason is "length", automatically asks the model
+    to continue and stitches the replies together, rather than just hoping
+    a bigger max_tokens is enough. Plain-text replies only -- concatenating
+    two truncated JSON fragments wouldn't parse, so json_mode callers
+    should keep using _call_chat_with_retry instead.
+    """
+    messages = list(kwargs.pop("messages"))
+    reply_parts = []
+    usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
+    for _ in range(max_continuations + 1):
+        result = _call_chat_with_retry(messages=messages, **kwargs)
+        reply_parts.append(result["reply"])
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            usage_total[key] += result["usage"].get(key, 0)
+        usage_total["estimated_cost_usd"] += result["usage"].get("estimated_cost_usd", 0.0)
+        if result.get("finish_reason") != "length":
+            break
+        messages = messages + [
+            {"role": "assistant", "content": result["reply"]},
+            {"role": "user", "content": "Continue exactly where you left off -- no repetition, no re-introduction."},
+        ]
+    usage_total["estimated_cost_usd"] = round(usage_total["estimated_cost_usd"], 6)
+    return {"reply": "".join(reply_parts), "usage": usage_total}
 
 
 def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 0.6, rate_limit_delay_seconds: float = 5.0, **kwargs) -> dict:
@@ -202,7 +243,7 @@ def ask_phoenix(
     messages.extend(conversation)
     messages.append({"role": "user", "content": question})
 
-    result = _call_chat(user_id=user_id, problem_id=problem["id"], messages=messages)
+    result = _call_chat_complete(user_id=user_id, problem_id=problem["id"], messages=messages, max_tokens=900)
     return {"answer": result["reply"], "usage": result["usage"]}
 
 
