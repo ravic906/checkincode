@@ -714,9 +714,16 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
         {"role": "system", "content": PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
+    # Python problems carry more content per item than SQL's (starter_code
+    # + function_signature + several test_code assertions + a full
+    # canonical_solution, vs. SQL's schema/seed/one-query trio), so this
+    # needs a more generous per-problem token budget than the SQL batch
+    # formula -- too tight a cap here truncates the JSON mid-generation,
+    # which surfaces as an opaque "Failed to validate JSON" from the
+    # provider rather than an obviously-a-token-limit error.
     result = _call_chat_with_retry(
         user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
-        max_tokens=min(4000, max(800, count * 350)), json_mode=True,
+        max_tokens=min(6000, max(1500, count * 600)), json_mode=True,
     )
     parsed = _parse_json_reply(result["reply"])
     return {"problems": parsed.get("problems", []), "usage": result["usage"]}
