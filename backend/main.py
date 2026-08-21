@@ -41,6 +41,8 @@ import stt
 import db
 import topics
 import py_topics
+import stats_topics
+import data_lib_topics
 import pysandbox
 import auth
 import users as users_module
@@ -684,14 +686,36 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
     is_python = req.track == "python"
     target_topics = req.topics or (py_topics.PY_GRADEABLE_TOPICS if is_python else topics.GRADEABLE_TOPICS)
 
+    # Statistics and pandas/numpy are topic vocabularies that ride the
+    # Python track's E2B grading (see stats_topics.py/data_lib_topics.py),
+    # not separate tracks -- so which system prompt to use is decided by
+    # which topics were actually requested, not by req.track alone. Only
+    # kicks in when the caller explicitly asked for topics entirely
+    # within one of these vocabularies; a mixed or omitted `topics` list
+    # falls back to the general Python Cookbook prompt.
+    python_system_prompt = None
+    if is_python and req.topics:
+        if all(t in stats_topics.STATS_TOPICS for t in req.topics):
+            python_system_prompt = llm.STATS_PYTHON_BATCH_SYSTEM_PROMPT
+        elif all(t in data_lib_topics.DATA_LIBRARY_TOPICS for t in req.topics):
+            python_system_prompt = llm.DATA_LIB_PYTHON_BATCH_SYSTEM_PROMPT
+
     try:
-        generate_fn = llm.generate_python_problem_batch if is_python else llm.generate_problem_batch
-        result = generate_fn(
-            user_id="admin",
-            topics=target_topics,
-            count=req.count,
-            existing_titles=problems_module.list_existing_titles(),
-        )
+        if is_python:
+            result = llm.generate_python_problem_batch(
+                user_id="admin",
+                topics=target_topics,
+                count=req.count,
+                existing_titles=problems_module.list_existing_titles(),
+                system_prompt=python_system_prompt,
+            )
+        else:
+            result = llm.generate_problem_batch(
+                user_id="admin",
+                topics=target_topics,
+                count=req.count,
+                existing_titles=problems_module.list_existing_titles(),
+            )
     except Exception as e:
         raise HTTPException(502, f"Couldn't generate problems right now ({e}).")
 
