@@ -32,6 +32,8 @@ import db
 import sandbox
 import topics
 import py_topics
+import stats_topics
+import data_lib_topics
 import pysandbox
 
 # Above this title-similarity ratio, a draft is treated as a near-duplicate
@@ -2493,7 +2495,15 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     if missing:
         raise InvalidDraftProblem(f"Draft missing fields: {missing}")
 
-    gradeable_topics = py_topics.PY_GRADEABLE_TOPICS if track == "python" else topics.GRADEABLE_TOPICS
+    # Statistics isn't a track of its own -- it's a topic vocabulary that
+    # cuts across Python (computational stats problems, graded here) and
+    # case-study (conceptual stats problems, graded once that track
+    # exists), so it's accepted alongside each track's own topic list
+    # rather than needing a 'stats' track value.
+    if track == "python":
+        gradeable_topics = py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+    else:
+        gradeable_topics = topics.GRADEABLE_TOPICS
     if draft["topic"] not in gradeable_topics:
         raise InvalidDraftProblem(f"Draft topic '{draft['topic']}' is not a gradeable topic for track '{track}'.")
 

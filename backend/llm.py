@@ -759,13 +759,82 @@ PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT = (
 )
 
 
-def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int, existing_titles: list[str] | None = None) -> dict:
+STATS_PYTHON_BATCH_SYSTEM_PROMPT = (
+    "You write practice statistics/probability problems for a data-"
+    "analytics interview-prep platform. Every problem is COMPUTATIONAL: "
+    "the student writes a Python function that computes a specific "
+    "statistical quantity from given data, verified by executing it "
+    "against assert-based test cases -- same contract as a Python coding "
+    "problem, just with statistical content (e.g. \"write a function "
+    "that computes a two-sample t-test p-value,\" \"calculate a "
+    "confidence interval for a conversion rate,\" \"detect Simpson's "
+    "paradox in this grouped data\").\n\n"
+    "Calibrate every problem to what a real data-analyst interview would "
+    "actually ask. Concretely:\n"
+    "- easy = a fair warm-up -- compute a mean/variance/standard "
+    "deviation correctly, including a real subtlety (e.g. sample vs. "
+    "population variance), not just calling a one-line library function.\n"
+    "- medium = combines a statistical concept with a realistic "
+    "analytics scenario (A/B test read-out, funnel conversion rate, "
+    "cohort retention) and has at least one non-obvious edge case (small "
+    "sample size, unequal variances, missing data).\n"
+    "- hard = genuine statistical reasoning under a real complication "
+    "(confounding, multiple comparisons, non-normal data, Simpson's "
+    "paradox), not just a harder formula.\n"
+    "If you wouldn't expect a real interviewer to plausibly ask a "
+    "version of this question, don't include it.\n\n"
+    "Every `description` MUST be fully unambiguous about WHAT is asked "
+    "-- exact inputs, exact expected return value/format, and every edge "
+    "case that matters -- but must give ZERO hint about HOW to solve it: "
+    "never name the statistical test/formula/library function the "
+    "solution needs, and never hint that a subtlety or gotcha is present "
+    "even generically. State the scenario plainly and let the candidate "
+    "figure out which test/approach applies.\n\n"
+    "You MAY use Python's standard library (`statistics`, `math`, "
+    "`random` for reproducible synthetic data) as well as `pandas` and "
+    "`numpy`, all of which the sandbox has pre-installed -- prefer the "
+    "standard library for a genuinely simple calculation, but don't "
+    "avoid pandas/numpy where a real analyst would naturally reach for "
+    "them (e.g. operating on a DataFrame/Series rather than raw lists). "
+    "Avoid `scipy`, which is not guaranteed to be available.\n\n"
+    "Vary the business domain across the batch (e-commerce, healthcare, "
+    "banking/fintech, logistics, SaaS, education, hospitality, "
+    "marketplaces, etc.) and vary the specific scenario even within the "
+    "same topic. Do not reuse a scenario or phrasing already used "
+    "earlier in this same batch.\n\n"
+    "`function_signature` names exactly the one function the student "
+    "must define. `starter_code` is the function signature plus a "
+    "docstring describing the task and a `pass` body -- no hints at the "
+    "solution. `test_code` is plain `assert` statements only (no "
+    "`unittest`/`pytest`), calling the function under EXACTLY the name "
+    "in `function_signature`, with at least 4-6 assertions covering "
+    "normal cases and at least one edge case. `canonical_solution` is a "
+    "full, correct implementation that passes every assertion -- never "
+    "shown to students, only used to validate the problem itself.\n\n"
+    "Respond with ONLY a JSON object, no other text, no markdown code "
+    'fences: {"problems": [{"title": "...", "difficulty": '
+    '"easy"|"medium"|"hard", "topic": "<one of the given topics, exactly '
+    'as written>", "tags": ["...", ...], "description": "...", '
+    '"starter_code": "...", "function_signature": "...", '
+    '"test_code": "...", "canonical_solution": "..."}, ...]}'
+)
+
+
+def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int, existing_titles: list[str] | None = None, system_prompt: str | None = None) -> dict:
     """
     Python-track equivalent of generate_problem_batch() -- same shape,
     same validation contract (callers MUST still run each draft's
     canonical_solution/test_code through pysandbox.run_python_submission
     before storing it, same as insert_pending_draft() already does).
+
+    `system_prompt` defaults to PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT, but
+    callers can swap in a different one (e.g. STATS_PYTHON_BATCH_SYSTEM_PROMPT)
+    for a differently-flavored batch while reusing this exact same
+    call/retry/parse machinery -- statistics isn't a separate track or a
+    separate generation function, just a different prompt over the same
+    "write a Python function + assert-based tests" contract.
     """
+    system_prompt = system_prompt or PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT
     user_prompt = (
         f"Draft {count} new practice problems spread across these topics "
         f"(cover each at least once if count allows): {', '.join(topics)}.\n"
@@ -779,7 +848,7 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
             "that's the same scenario under a different name:\n" + titles_block
         )
     messages = [
-        {"role": "system", "content": PYTHON_PROBLEM_BATCH_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
     # Python problems carry more content per item than SQL's (starter_code
