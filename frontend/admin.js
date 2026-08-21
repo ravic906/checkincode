@@ -87,6 +87,53 @@ async function rejectDraft(id) {
 }
 
 let allLiveProblems = [];
+let activeLiveCategory = null; // null | "sql" | "python" | "pandas" | "numpy" -- set by clicking a count pill, drills the list without needing the track dropdown too
+
+// Same bucketing rule as problems.py's _category_bucket() / admin-users.js's
+// categoryBucket() -- pandas/numpy are topic buckets within track='python',
+// not their own track.
+const LIVE_PANDAS_TOPICS = new Set([
+  "Pandas Data Cleaning & Missing Data",
+  "Pandas Merging, Joining & Reshaping",
+  "Pandas GroupBy & Aggregation",
+  "Pandas Time Series Operations",
+]);
+const LIVE_NUMPY_TOPICS = new Set([
+  "NumPy Array Creation & Indexing",
+  "NumPy Broadcasting & Vectorization",
+  "NumPy Aggregations & Boolean Masking",
+]);
+function liveCategoryBucket(p) {
+  if (p.track !== "python") return "sql";
+  if (LIVE_PANDAS_TOPICS.has(p.topic)) return "pandas";
+  if (LIVE_NUMPY_TOPICS.has(p.topic)) return "numpy";
+  return "python";
+}
+
+function renderLiveCategoryCounts() {
+  const counts = { sql: 0, python: 0, pandas: 0, numpy: 0 };
+  for (const p of allLiveProblems) counts[liveCategoryBucket(p)]++;
+  const labels = { sql: "SQL", python: "Python", pandas: "Pandas", numpy: "NumPy" };
+  const el = document.getElementById("liveCategoryCounts");
+  el.innerHTML = Object.entries(labels).map(([key, label]) => `
+    <button class="category-pill${activeLiveCategory === key ? " active" : ""}" data-category="${key}">
+      ${label} <span class="category-pill-count">${counts[key]}</span>
+    </button>
+  `).join("") + (activeLiveCategory ? `<button class="category-pill clear-pill" id="clearLiveCategoryBtn">Clear ✕</button>` : "");
+  el.querySelectorAll(".category-pill[data-category]").forEach(btn => {
+    btn.onclick = () => {
+      activeLiveCategory = btn.dataset.category;
+      renderLiveCategoryCounts();
+      applyLiveFilters();
+    };
+  });
+  const clearBtn = document.getElementById("clearLiveCategoryBtn");
+  if (clearBtn) clearBtn.onclick = () => {
+    activeLiveCategory = null;
+    renderLiveCategoryCounts();
+    applyLiveFilters();
+  };
+}
 
 function renderLiveCard(p) {
   return `
@@ -104,6 +151,7 @@ function applyLiveFilters() {
   const q = document.getElementById("liveSearch").value.trim().toLowerCase();
   const track = document.getElementById("liveTrackFilter").value;
   const filtered = allLiveProblems.filter(p => {
+    if (activeLiveCategory && liveCategoryBucket(p) !== activeLiveCategory) return false;
     if (track && p.track !== track) return false;
     if (q && !(p.title.toLowerCase().includes(q) || p.topic.toLowerCase().includes(q))) return false;
     return true;
@@ -121,6 +169,7 @@ async function loadLive() {
   try {
     const data = await adminApi("/api/admin/problems/live");
     allLiveProblems = data.problems;
+    renderLiveCategoryCounts();
     applyLiveFilters();
   } catch (err) {
     listEl.innerHTML = `<div class="result-banner fail">${escapeHtml(err.message)}</div>`;

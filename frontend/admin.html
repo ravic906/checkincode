@@ -42,6 +42,14 @@
   }
   .live-card .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .unpublish-btn { background: var(--red); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .category-pills { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .category-pill {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .category-pill.active { border-color: var(--accent); background: var(--panel-2); }
+  .category-pill-count { color: var(--muted); margin-left: 4px; }
+  .category-pill.clear-pill { color: var(--muted); border-style: dashed; }
 </style>
 </head>
 <body>
@@ -71,6 +79,7 @@
   </div>
 
   <div id="liveSection" style="display:none;">
+    <div class="category-pills" id="liveCategoryCounts"></div>
     <div class="filter-row">
       <input type="text" id="liveSearch" placeholder="Search title or topic…" />
       <select id="liveTrackFilter">
