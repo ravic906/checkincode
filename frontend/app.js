@@ -69,8 +69,21 @@ function showHome() {
   closeAskPhoenix();
   if (window.stopInterviewAudio) window.stopInterviewAudio();
 }
+function _resetPracticeWorkspace() {
+  // Switching tracks (SQL <-> Python) while a problem was loaded would
+  // otherwise leave the OTHER track's problem still rendered in the
+  // workspace, out of sync with the sidebar's now-different problem list.
+  currentProblem = null;
+  document.getElementById("workspace").innerHTML = `
+    <div class="empty-state">
+      <h2>Pick a problem to get started</h2>
+      <p>Every answer is verified by actually running it — no guessing whether you're right. Stuck? Ask Phoenix for help, any time.</p>
+    </div>
+  `;
+}
 function showSqlTrack() {
   currentTrack = "sql";
+  _resetPracticeWorkspace();
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
@@ -82,6 +95,7 @@ function showSqlTrack() {
 }
 function showPythonTrack() {
   currentTrack = "python";
+  _resetPracticeWorkspace();
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
