@@ -733,9 +733,23 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
     # JSON" instruction plus _parse_json_reply's existing defensive
     # parsing (already strips code fences) avoids the provider-side
     # failure entirely.
-    result = _call_chat_with_retry(
-        user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
-        max_tokens=min(6000, max(1500, count * 600)), json_mode=False,
-    )
-    parsed = _parse_json_reply(result["reply"])
-    return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+    # Without json_mode enforcing strict validity provider-side, the model
+    # occasionally slips on its own JSON escaping -- most often an
+    # unescaped quote inside a Python docstring/f-string value prematurely
+    # closing a JSON string. This is a stochastic generation error (a
+    # fresh sample usually just works), not a deterministic one, so retry
+    # the whole call a couple of times on a parse failure before giving up
+    # -- unlike _call_chat_with_retry's retries, which only cover HTTP-level
+    # failures, not "the call succeeded but produced malformed JSON".
+    last_parse_error = None
+    for attempt in range(3):
+        result = _call_chat_with_retry(
+            user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
+            max_tokens=min(6000, max(1500, count * 600)), json_mode=False,
+        )
+        try:
+            parsed = _parse_json_reply(result["reply"])
+            return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+        except (json.JSONDecodeError, KeyError) as e:
+            last_parse_error = e
+    raise RuntimeError(f"Model didn't return valid JSON after 3 attempts ({last_parse_error}).")
