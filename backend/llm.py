@@ -1065,7 +1065,7 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
             # code (the model's own solution failing its own asserts)
             # without a corresponding gain in scenario variety worth that
             # trade for code correctness the way it was for SQL scenarios.
-            timeout=120, temperature=0.6,
+            timeout=120, temperature=0.75,
         )
         try:
             parsed = _parse_json_reply(result["reply"])
