@@ -140,7 +140,7 @@ def update_topic_tracking(session: dict, action: str, topic: str):
     current topic, so callers can enforce MAX_TURNS_PER_TOPIC deterministically
     rather than relying on the model to police its own turn budget.
     """
-    if action == "switch_topic" or session["current_topic"] != topic:
+    if action == "switch_topic" or session["current_topic"] is None:
         session["current_topic"] = topic
         session["current_topic_turns"] = 1
         if topic not in session["topics_covered"]:
