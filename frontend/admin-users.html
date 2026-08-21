@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Phoenix Prep — Admin: Users</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .admin-nav { display: flex; gap: 8px; margin-bottom: 20px; }
+  .admin-nav a {
+    color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+  }
+  .admin-nav a.active { color: var(--text); background: var(--panel-2); border-color: var(--accent); }
+  .token-row { display: flex; gap: 8px; margin-bottom: 24px; }
+  .token-row input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .summary-cards { display: flex; gap: 14px; margin-bottom: 24px; }
+  .summary-card {
+    flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; text-align: center;
+  }
+  .summary-card .num { font-size: 26px; font-weight: 700; }
+  .summary-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr.user-row { cursor: pointer; }
+  tr.user-row:hover { background: var(--panel-2); }
+  .tier-pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .tier-pill.paid { background: rgba(56,193,114,0.15); color: var(--green); }
+  .tier-pill.free { background: rgba(138,147,166,0.15); color: var(--muted); }
+  .history-panel { display: none; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 0 0 14px 0; }
+  .history-panel.open { display: block; }
+  .history-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .history-row:last-child { border-bottom: none; }
+  .pass-mark { color: var(--green); }
+  .fail-mark { color: var(--red); }
+</style>
+</head>
+<body>
+  <div class="admin-header">
+    <h1>User Analytics</h1>
+  </div>
+
+  <div class="admin-nav">
+    <a href="admin.html">Problem Review</a>
+    <a href="admin-users.html" class="active">Users</a>
+  </div>
+
+  <div class="token-row">
+    <input type="password" id="adminToken" placeholder="Admin token" />
+    <button class="submit-btn" id="loadBtn">Load Users</button>
+  </div>
+
+  <div class="summary-cards" id="summaryCards"></div>
+  <div id="historyPanel" class="history-panel"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Email / ID</th>
+        <th>Tier</th>
+        <th>Submissions Today</th>
+        <th>Total Submissions</th>
+        <th>Solved</th>
+        <th>Interviews This Month</th>
+        <th>Joined</th>
+      </tr>
+    </thead>
+    <tbody id="usersBody"></tbody>
+  </table>
+
+  <script src="config.js"></script>
+  <script src="admin-users.js"></script>
+</body>
+</html>

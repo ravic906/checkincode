@@ -18,21 +18,69 @@
   .approve-btn { background: var(--green); color: #0f1115; }
   .reject-btn { background: var(--red); color: white; }
   .cadence-note { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  .admin-nav { display: flex; gap: 8px; margin-bottom: 20px; }
+  .admin-nav a {
+    color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+  }
+  .admin-nav a.active { color: var(--text); background: var(--panel-2); border-color: var(--accent); }
+  .staging-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+  .staging-tabs button {
+    background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  .staging-tabs button.active { color: var(--text); background: var(--panel-2); border-color: var(--accent); }
+  .filter-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .filter-row input, .filter-row select {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  }
+  .filter-row input { flex: 1; }
+  .live-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .live-card .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .unpublish-btn { background: var(--red); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
 </style>
 </head>
 <body>
   <div class="admin-header">
-    <h1>Problem Review</h1>
+    <h1>Problem Staging</h1>
     <button class="run-btn" id="generateBtn">Generate New Batch</button>
+  </div>
+
+  <div class="admin-nav">
+    <a href="admin.html" class="active">Problem Review</a>
+    <a href="admin-users.html">Users</a>
   </div>
 
   <div class="token-row">
     <input type="password" id="adminToken" placeholder="Admin token" />
-    <button class="submit-btn" id="loadBtn">Load Pending</button>
+    <button class="submit-btn" id="loadBtn">Load</button>
   </div>
 
-  <div class="cadence-note" id="cadenceNote"></div>
-  <div id="pendingList"></div>
+  <div class="staging-tabs">
+    <button id="tabPending" class="active">Pending Drafts</button>
+    <button id="tabLive">Live Problems</button>
+  </div>
+
+  <div id="pendingSection">
+    <div class="cadence-note" id="cadenceNote"></div>
+    <div id="pendingList"></div>
+  </div>
+
+  <div id="liveSection" style="display:none;">
+    <div class="filter-row">
+      <input type="text" id="liveSearch" placeholder="Search title or topic…" />
+      <select id="liveTrackFilter">
+        <option value="">All tracks</option>
+        <option value="sql">SQL</option>
+        <option value="python">Python</option>
+      </select>
+    </div>
+    <div id="liveList"></div>
+  </div>
 
   <script src="config.js"></script>
   <script src="admin.js"></script>

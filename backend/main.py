@@ -737,6 +737,52 @@ def api_admin_list_pending(x_admin_token: str = Header(default=None)):
     return {"problems": problems_module.list_pending_problems()}
 
 
+@app.get("/api/admin/users/summary")
+def api_admin_users_summary(x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    return users_module.get_admin_summary()
+
+
+@app.get("/api/admin/users")
+def api_admin_list_users(x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    return {"users": users_module.list_all_users()}
+
+
+@app.get("/api/admin/users/{user_id}/history")
+def api_admin_user_history(user_id: str, x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    return {"history": problems_module.get_user_submission_history(user_id)}
+
+
+@app.get("/api/admin/problems/live")
+def api_admin_list_live(x_admin_token: str = Header(default=None)):
+    """Full live-problem bank for the admin staging-area page -- lets an
+    admin find and unpublish an already-live problem (e.g. a duplicate-
+    concept one found during a content audit), not just gate new drafts
+    before they first go live."""
+    _require_admin(x_admin_token)
+    return {"problems": problems_module.list_live_problems_full()}
+
+
+@app.post("/api/admin/problems/{problem_id}/unpublish")
+def api_admin_unpublish(problem_id: str, x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    ok = problems_module.unpublish_problem(problem_id)
+    if not ok:
+        raise HTTPException(404, "Live problem not found.")
+    return {"id": problem_id, "status": "archived"}
+
+
+@app.post("/api/admin/problems/{problem_id}/republish")
+def api_admin_republish(problem_id: str, x_admin_token: str = Header(default=None)):
+    _require_admin(x_admin_token)
+    ok = problems_module.republish_problem(problem_id)
+    if not ok:
+        raise HTTPException(404, "Archived problem not found.")
+    return {"id": problem_id, "status": "live"}
+
+
 @app.get("/api/admin/problems/{problem_id}")
 def api_admin_get_problem(problem_id: str, x_admin_token: str = Header(default=None)):
     """

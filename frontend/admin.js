@@ -86,7 +86,79 @@ async function rejectDraft(id) {
   }
 }
 
-document.getElementById("loadBtn").onclick = loadPending;
+let allLiveProblems = [];
+
+function renderLiveCard(p) {
+  return `
+    <div class="live-card" id="live-${p.id}">
+      <div>
+        <div>${escapeHtml(p.title)}</div>
+        <div class="meta">${escapeHtml(p.track)} · ${escapeHtml(p.difficulty)} · ${escapeHtml(p.topic)} · ${escapeHtml((p.tags || []).join(", "))}</div>
+      </div>
+      <button class="unpublish-btn" onclick="unpublishProblem('${p.id}')">Unpublish</button>
+    </div>
+  `;
+}
+
+function applyLiveFilters() {
+  const q = document.getElementById("liveSearch").value.trim().toLowerCase();
+  const track = document.getElementById("liveTrackFilter").value;
+  const filtered = allLiveProblems.filter(p => {
+    if (track && p.track !== track) return false;
+    if (q && !(p.title.toLowerCase().includes(q) || p.topic.toLowerCase().includes(q))) return false;
+    return true;
+  });
+  const listEl = document.getElementById("liveList");
+  listEl.innerHTML = filtered.length
+    ? filtered.map(renderLiveCard).join("")
+    : `<p style="color:var(--muted);">No matching live problems.</p>`;
+}
+
+async function loadLive() {
+  localStorage.setItem("phoenix_admin_token", getToken());
+  const listEl = document.getElementById("liveList");
+  listEl.innerHTML = `<div class="loading-dots">Loading…</div>`;
+  try {
+    const data = await adminApi("/api/admin/problems/live");
+    allLiveProblems = data.problems;
+    applyLiveFilters();
+  } catch (err) {
+    listEl.innerHTML = `<div class="result-banner fail">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function unpublishProblem(id) {
+  if (!confirm("Unpublish this problem? It will no longer be shown to students (can be republished later if needed).")) return;
+  try {
+    await adminApi(`/api/admin/problems/${id}/unpublish`, { method: "POST" });
+    document.getElementById(`live-${id}`).remove();
+    allLiveProblems = allLiveProblems.filter(p => p.id !== id);
+  } catch (err) {
+    alert(`Unpublish failed: ${err.message}`);
+  }
+}
+
+document.getElementById("liveSearch").addEventListener("input", applyLiveFilters);
+document.getElementById("liveTrackFilter").addEventListener("change", applyLiveFilters);
+
+document.getElementById("tabPending").onclick = () => {
+  document.getElementById("tabPending").classList.add("active");
+  document.getElementById("tabLive").classList.remove("active");
+  document.getElementById("pendingSection").style.display = "";
+  document.getElementById("liveSection").style.display = "none";
+};
+document.getElementById("tabLive").onclick = () => {
+  document.getElementById("tabLive").classList.add("active");
+  document.getElementById("tabPending").classList.remove("active");
+  document.getElementById("liveSection").style.display = "";
+  document.getElementById("pendingSection").style.display = "none";
+  if (allLiveProblems.length === 0) loadLive();
+};
+
+document.getElementById("loadBtn").onclick = () => {
+  const onLiveTab = document.getElementById("tabLive").classList.contains("active");
+  return onLiveTab ? loadLive() : loadPending();
+};
 document.getElementById("generateBtn").onclick = async () => {
   const btn = document.getElementById("generateBtn");
   btn.disabled = true;

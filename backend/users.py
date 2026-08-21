@@ -95,6 +95,42 @@ def increment_interview_count(user_id: str):
             cur.execute("UPDATE users SET interviews_this_month = interviews_this_month + 1 WHERE id = %s", (user_id,))
 
 
+def get_admin_summary() -> dict:
+    """Total users + tier breakdown, for the admin user-analytics page."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE tier = 'paid') AS paid FROM users")
+            row = cur.fetchone()
+            return {
+                "total_users": row["total"],
+                "paid_users": row["paid"],
+                "free_users": row["total"] - row["paid"],
+            }
+
+
+def list_all_users() -> list[dict]:
+    """Every user with aggregated submission stats, for the admin
+    user-analytics page's user table. Per-user submission-level detail
+    (which problems, when) is a separate call -- see
+    problems.get_user_submission_history -- since that's only fetched
+    on demand when an admin drills into one user."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute("""
+                SELECT u.id, u.email, u.tier, u.submissions_today,
+                       u.interviews_this_month, u.created_at,
+                       COUNT(s.id) AS total_submissions,
+                       COUNT(s.id) FILTER (WHERE s.correct) AS correct_submissions,
+                       COUNT(DISTINCT s.problem_id) FILTER (WHERE s.correct) AS solved_count
+                FROM users u
+                LEFT JOIN submissions s ON s.user_id = u.id
+                GROUP BY u.id, u.email, u.tier, u.submissions_today,
+                         u.interviews_this_month, u.created_at
+                ORDER BY u.created_at DESC
+            """)
+            return [dict(r) for r in cur.fetchall()]
+
+
 def set_tier(user_id: str, tier: str, email: str | None = None):
     """Upserts so a payment webhook/verify call succeeds even if this is
     the user's very first request (e.g. they signed in on a different

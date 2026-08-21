@@ -2444,6 +2444,26 @@ def get_solved_problem_ids(user_id: str) -> set:
             return {row[0] for row in cur.fetchall()}
 
 
+def get_user_submission_history(user_id: str) -> list[dict]:
+    """Every submission a user has ever made, newest first, joined with
+    the problem's title/track/topic/difficulty for the admin
+    user-analytics page's per-user drill-down."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT s.id, s.problem_id, p.title, p.track, p.topic,
+                       p.difficulty, s.correct, s.submitted_at
+                FROM submissions s
+                LEFT JOIN problems p ON p.id = s.problem_id
+                WHERE s.user_id = %s
+                ORDER BY s.submitted_at DESC
+                """,
+                (user_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
 def reset_user_submissions(user_id: str) -> int:
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -2613,6 +2633,40 @@ def reject_problem(problem_id: str) -> bool:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM problems WHERE id = %s AND status = 'pending_review'", (problem_id,))
             return cur.rowcount > 0
+
+
+def unpublish_problem(problem_id: str) -> bool:
+    """Pulls an already-LIVE problem out of circulation -- e.g. one found
+    during a content-quality audit to be a near-duplicate of another
+    problem. Sets status='archived' rather than deleting the row, since
+    `submissions` references problem_id and a hard delete would orphan
+    a user's submission history for it (shows as "deleted problem" in
+    the admin user-history view instead of the real title)."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET status = 'archived' WHERE id = %s AND status = 'live'", (problem_id,))
+            return cur.rowcount > 0
+
+
+def republish_problem(problem_id: str) -> bool:
+    """Undoes unpublish_problem -- puts an archived problem back live."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET status = 'live' WHERE id = %s AND status = 'archived'", (problem_id,))
+            return cur.rowcount > 0
+
+
+def list_live_problems_full() -> list[dict]:
+    """Every live problem with full fields (title/topic/tags/track/
+    difficulty), for the admin staging-area page -- unlike
+    list_problems_summary, this is admin-only and isn't tier-filtered."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(
+                "SELECT id, title, difficulty, topic, tags, track, is_free FROM problems "
+                "WHERE status = 'live' ORDER BY track, topic, title"
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 def get_last_batch_generated_at():
