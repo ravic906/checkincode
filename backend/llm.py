@@ -718,12 +718,24 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
     # + function_signature + several test_code assertions + a full
     # canonical_solution, vs. SQL's schema/seed/one-query trio), so this
     # needs a more generous per-problem token budget than the SQL batch
-    # formula -- too tight a cap here truncates the JSON mid-generation,
-    # which surfaces as an opaque "Failed to validate JSON" from the
-    # provider rather than an obviously-a-token-limit error.
+    # formula.
+    #
+    # json_mode is deliberately OFF here, unlike every other structured
+    # call in this file -- Groq's strict JSON response_format reproducibly
+    # failed ("Failed to validate JSON", empty failed_generation) on this
+    # specific prompt/schema even after the token budget was ruled out as
+    # the cause, while the same mode works fine for the SQL batch prompt.
+    # Likely cause: Python test_code/canonical_solution values routinely
+    # mix single and double quotes within the same string (docstrings,
+    # f-strings) in a way SQL's schema/seed/query values rarely do,
+    # apparently harder for Groq's constrained-JSON backend to handle for
+    # this payload shape. Falling back to the plain "respond with ONLY
+    # JSON" instruction plus _parse_json_reply's existing defensive
+    # parsing (already strips code fences) avoids the provider-side
+    # failure entirely.
     result = _call_chat_with_retry(
         user_id=user_id, problem_id="admin-python-problem-batch", messages=messages,
-        max_tokens=min(6000, max(1500, count * 600)), json_mode=True,
+        max_tokens=min(6000, max(1500, count * 600)), json_mode=False,
     )
     parsed = _parse_json_reply(result["reply"])
     return {"problems": parsed.get("problems", []), "usage": result["usage"]}
