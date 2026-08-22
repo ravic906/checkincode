@@ -2488,23 +2488,25 @@ def record_submission(user_id: str, problem_id: str, correct: bool):
 
 
 def _category_bucket(track: str, topic: str) -> str:
-    """Buckets a (track, topic) pair into one of the four content
+    """Buckets a (track, topic) pair into one of the five content
     categories shown on the admin dashboard's solved-by-category chart --
-    pandas/numpy are topic vocabularies within track='python' (see
-    data_lib_topics.py), not their own track, so distinguishing them
-    means checking topic, not just track."""
+    pandas/numpy/stats are topic vocabularies within track='python' (see
+    data_lib_topics.py / stats_topics.py), not their own track, so
+    distinguishing them means checking topic, not just track."""
     if track != "python":
         return "sql"
     if topic in data_lib_topics.DATA_LIBRARY_TOPICS:
         return "pandas" if topic.startswith("Pandas") else "numpy"
+    if topic in stats_topics.STATS_TOPICS:
+        return "stats"
     return "python"
 
 
 def get_platform_solved_breakdown() -> dict:
     """Distinct (user, problem) pairs with a correct submission, bucketed
-    into sql/python/pandas/numpy -- the platform-wide chart on the admin
-    Users page. Distinct so re-solving the same problem twice doesn't
-    double-count."""
+    into sql/python/stats/pandas/numpy -- the platform-wide chart on the
+    admin Users page. Distinct so re-solving the same problem twice
+    doesn't double-count."""
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
             cur.execute(
@@ -2516,7 +2518,7 @@ def get_platform_solved_breakdown() -> dict:
                 """
             )
             rows = cur.fetchall()
-    counts = {"sql": 0, "python": 0, "pandas": 0, "numpy": 0}
+    counts = {"sql": 0, "python": 0, "stats": 0, "pandas": 0, "numpy": 0}
     for r in rows:
         counts[_category_bucket(r["track"], r["topic"])] += 1
     return counts

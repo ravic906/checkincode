@@ -39,8 +39,9 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// --- Category bucketing (pandas/numpy are topics within track='python',
-// not their own track -- mirrors problems.py's _category_bucket()). ---
+// --- Category bucketing (pandas/numpy/stats are topics within
+// track='python', not their own track -- mirrors problems.py's
+// _category_bucket()). ---
 
 const PANDAS_TOPICS = new Set([
   "Pandas Data Cleaning & Missing Data",
@@ -53,23 +54,36 @@ const NUMPY_TOPICS = new Set([
   "NumPy Broadcasting & Vectorization",
   "NumPy Aggregations & Boolean Masking",
 ]);
+const STATS_TOPICS = new Set([
+  "Descriptive Statistics",
+  "Probability Fundamentals",
+  "Distributions",
+  "Hypothesis Testing",
+  "A/B Testing & Experimental Design",
+  "Confidence Intervals & Estimation",
+  "Regression Fundamentals",
+  "Bayesian Reasoning",
+  "Sampling & Bias",
+]);
 function categoryBucket(track, topic) {
   if (track !== "python") return "sql";
   if (PANDAS_TOPICS.has(topic)) return "pandas";
   if (NUMPY_TOPICS.has(topic)) return "numpy";
+  if (STATS_TOPICS.has(topic)) return "stats";
   return "python";
 }
 
 const CATEGORY_META = {
   sql: { label: "SQL", color: "var(--accent)" },
   python: { label: "Python", color: "var(--green)" },
+  stats: { label: "Statistics", color: "#b083f0" },
   pandas: { label: "Pandas", color: "var(--amber)" },
   numpy: { label: "NumPy", color: "var(--red)" },
 };
 
-// Small SVG pie chart from {sql, python, pandas, numpy} counts, plus a
-// text legend -- no charting library, this is a no-build-step frontend
-// and a handful of arcs is simple enough to compute directly.
+// Small SVG pie chart from {sql, python, stats, pandas, numpy} counts,
+// plus a text legend -- no charting library, this is a no-build-step
+// frontend and a handful of arcs is simple enough to compute directly.
 function renderCategoryPie(counts, size = 120) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const r = size / 2;

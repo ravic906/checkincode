@@ -33,7 +33,7 @@ function renderUserRow(u) {
 
 function computeUserBreakdown(history) {
   const solvedProblemIds = new Set();
-  const counts = { sql: 0, python: 0, pandas: 0, numpy: 0 };
+  const counts = { sql: 0, python: 0, stats: 0, pandas: 0, numpy: 0 };
   for (const h of history) {
     if (!h.correct || solvedProblemIds.has(h.problem_id)) continue;
     solvedProblemIds.add(h.problem_id);

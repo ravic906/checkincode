@@ -62,10 +62,10 @@ async function rejectDraft(id) {
 }
 
 let allLiveProblems = [];
-let activeLiveCategory = null; // null | "sql" | "python" | "pandas" | "numpy" -- set by clicking a count pill
+let activeLiveCategory = null; // null | "sql" | "python" | "stats" | "pandas" | "numpy" -- set by clicking a count pill
 
 function renderLiveCategoryCounts() {
-  const counts = { sql: 0, python: 0, pandas: 0, numpy: 0 };
+  const counts = { sql: 0, python: 0, stats: 0, pandas: 0, numpy: 0 };
   for (const p of allLiveProblems) counts[categoryBucket(p.track, p.topic)]++;
   const el = document.getElementById("liveCategoryCounts");
   el.innerHTML = Object.entries(CATEGORY_META).map(([key, meta]) => `
