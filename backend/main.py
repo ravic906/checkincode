@@ -876,6 +876,30 @@ def api_admin_republish(problem_id: str, request: Request):
     return {"id": problem_id, "status": "live"}
 
 
+class SetTopicRequest(BaseModel):
+    topic: str
+
+
+@app.post("/api/admin/problems/{problem_id}/set-topic")
+def api_admin_set_topic(problem_id: str, req: SetTopicRequest, request: Request):
+    """Manual override for a single problem's topic -- e.g. when the
+    automated reclassify-topics pass itself proposes a wrong label (it's
+    an LLM call, not infallible) and a human reviewer needs to correct
+    it directly rather than re-running the same fallible classifier."""
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    allowed_topics = (
+        topics.GRADEABLE_TOPICS if p.get("track", "sql") == "sql"
+        else py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+    )
+    if req.topic not in allowed_topics:
+        raise HTTPException(400, f"'{req.topic}' is not a valid topic for this problem's track.")
+    problems_module.set_problem_topic(problem_id, req.topic)
+    return {"id": problem_id, "topic": req.topic}
+
+
 @app.get("/api/admin/problems/{problem_id}")
 def api_admin_get_problem(problem_id: str, request: Request):
     """
