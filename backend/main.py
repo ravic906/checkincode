@@ -797,6 +797,67 @@ def api_admin_list_live(request: Request):
     return {"problems": problems_module.list_live_problems_full()}
 
 
+class ReclassifyRequest(BaseModel):
+    track: str
+    ids: list[str]
+
+
+@app.post("/api/admin/problems/reclassify-topics")
+def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
+    """
+    Audits an explicit batch of already-live problems for topic
+    mislabeling (see llm.reclassify_topics_batch) and relabels any whose
+    real code doesn't match their current topic. Takes an explicit id
+    list (not "do the whole track") so a full sweep can be driven in
+    small, resumable, monitorable batches from the caller side, the same
+    pattern already used for content generation and approval this
+    session -- not because a single large call couldn't work, but
+    because it's proven more resilient to timeouts/retries in practice.
+
+    Registered here (before the GET /{problem_id} route below) rather
+    than near the other POST /{problem_id}/... actions -- Starlette
+    matches path SHAPE before checking method across all routes with
+    that shape, so a literal path with the same segment count as
+    /{problem_id} has to come before it or it 405s (a "reclassify-topics"
+    request matches the {problem_id} pattern first and finds only GET
+    registered there).
+    """
+    _require_admin(request)
+    if req.track not in ("sql", "python"):
+        raise HTTPException(400, "track must be 'sql' or 'python'")
+    allowed_topics = (
+        topics.GRADEABLE_TOPICS if req.track == "sql"
+        else py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+    )
+    batch = []
+    for pid in req.ids:
+        p = problems_module.get_problem(pid)
+        if p and p.get("track", "sql") == req.track:
+            batch.append(p)
+    if not batch:
+        return {"checked": 0, "relabeled": []}
+
+    try:
+        result = llm.reclassify_topics_batch(
+            user_id="admin", problems=batch, allowed_topics=allowed_topics, track=req.track,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't reclassify right now ({e}).")
+
+    by_id = {p["id"]: p for p in batch}
+    relabeled = []
+    for r in result["results"]:
+        pid = r.get("id")
+        new_topic = r.get("topic")
+        if pid not in by_id or new_topic not in allowed_topics:
+            continue
+        old_topic = by_id[pid]["topic"]
+        if new_topic != old_topic:
+            problems_module.set_problem_topic(pid, new_topic)
+            relabeled.append({"id": pid, "old": old_topic, "new": new_topic})
+    return {"checked": len(batch), "relabeled": relabeled, "usage": result["usage"]}
+
+
 @app.post("/api/admin/problems/{problem_id}/unpublish")
 def api_admin_unpublish(problem_id: str, request: Request):
     _require_admin(request)
@@ -939,59 +1000,6 @@ def api_admin_set_admin(req: SetAdminRequest, request: Request):
 def api_admin_list_admins(request: Request):
     _require_admin(request)
     return {"admins": users_module.list_admins()}
-
-
-class ReclassifyRequest(BaseModel):
-    track: str
-    ids: list[str]
-
-
-@app.post("/api/admin/problems/reclassify-topics")
-def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
-    """
-    Audits an explicit batch of already-live problems for topic
-    mislabeling (see llm.reclassify_topics_batch) and relabels any whose
-    real code doesn't match their current topic. Takes an explicit id
-    list (not "do the whole track") so a full sweep can be driven in
-    small, resumable, monitorable batches from the caller side, the same
-    pattern already used for content generation and approval this
-    session -- not because a single large call couldn't work, but
-    because it's proven more resilient to timeouts/retries in practice.
-    """
-    _require_admin(request)
-    if req.track not in ("sql", "python"):
-        raise HTTPException(400, "track must be 'sql' or 'python'")
-    allowed_topics = (
-        topics.GRADEABLE_TOPICS if req.track == "sql"
-        else py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
-    )
-    batch = []
-    for pid in req.ids:
-        p = problems_module.get_problem(pid)
-        if p and p.get("track", "sql") == req.track:
-            batch.append(p)
-    if not batch:
-        return {"checked": 0, "relabeled": []}
-
-    try:
-        result = llm.reclassify_topics_batch(
-            user_id="admin", problems=batch, allowed_topics=allowed_topics, track=req.track,
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Couldn't reclassify right now ({e}).")
-
-    by_id = {p["id"]: p for p in batch}
-    relabeled = []
-    for r in result["results"]:
-        pid = r.get("id")
-        new_topic = r.get("topic")
-        if pid not in by_id or new_topic not in allowed_topics:
-            continue
-        old_topic = by_id[pid]["topic"]
-        if new_topic != old_topic:
-            problems_module.set_problem_topic(pid, new_topic)
-            relabeled.append({"id": pid, "old": old_topic, "new": new_topic})
-    return {"checked": len(batch), "relabeled": relabeled, "usage": result["usage"]}
 
 
 @app.get("/api/whoami")
