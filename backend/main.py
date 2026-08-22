@@ -981,6 +981,22 @@ def api_admin_get_problem(problem_id: str, request: Request):
     return p
 
 
+@app.get("/api/admin/problems/{problem_id}/check-test-discriminates")
+def api_admin_check_test_discriminates(problem_id: str, request: Request):
+    """Runs an already-live Python problem's test_code against a
+    deliberately wrong stub (see pysandbox.test_code_discriminates) --
+    for auditing the existing bank for the same vacuous-test defect the
+    insert-time validation now catches for new drafts."""
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p or p.get("track") != "python":
+        raise HTTPException(404, "Python problem not found.")
+    discriminates = pysandbox.test_code_discriminates(
+        test_code=p["test_code"], function_signature=p["function_signature"],
+    )
+    return {"id": problem_id, "discriminates": discriminates}
+
+
 @app.post("/api/admin/problems/{problem_id}/compute-examples")
 def api_admin_compute_examples(problem_id: str, request: Request):
     """
