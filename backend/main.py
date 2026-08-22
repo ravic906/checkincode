@@ -44,6 +44,7 @@ import topics
 import py_topics
 import stats_topics
 import data_lib_topics
+import case_topics
 import pysandbox
 import auth
 import users as users_module
@@ -128,6 +129,8 @@ def api_topics():
         "python": py_topics.PY_GRADEABLE_TOPICS,
         "stats": stats_topics.STATS_TOPICS,
         "data_lib": data_lib_topics.DATA_LIBRARY_TOPICS,
+        "case_da": case_topics.CASE_DA_TOPICS,
+        "case_de": case_topics.CASE_DE_TOPICS,
     }
 
 
@@ -174,6 +177,18 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
             "track": "python",
             "starter_code": p["starter_code"],
             "examples": p.get("examples") or [],
+        }
+
+    if p.get("track") == "case":
+        return {
+            "id": p["id"],
+            "title": p["title"],
+            "difficulty": p["difficulty"],
+            "topic": p["topic"],
+            "tags": p["tags"],
+            "track": "case",
+            "case_prompt": p["case_prompt"],
+            "case_context": p.get("case_context"),
         }
 
     con = duckdb.connect(":memory:", config={"enable_external_access": False})
@@ -397,6 +412,77 @@ def api_ask_phoenix(req: AskPhoenixRequest, x_user_id: str = Header(default=None
         return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
     except Exception as e:
         raise HTTPException(502, f"Ask Phoenix unavailable right now ({e}).")
+
+
+class CaseSubmitRequest(BaseModel):
+    problem_id: str
+    answer: str
+    follow_up_question: str | None = None
+    follow_up_answer: str | None = None
+
+
+@app.post("/api/case/submit")
+def api_case_submit(req: CaseSubmitRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Business Case track submission -- rubric-graded by an AI judge
+    (llm.case_feedback), not execution, since there's no single verifiable
+    right answer. Same free/paid gating shape as SQL/Python (curated free
+    sample + Pro-gated full bank, riding the same FREE_DAILY_SUBMISSIONS
+    counter) -- deliberately NOT fully Pro-gated like Ask Phoenix/Mock
+    Interview, since this track is meant to be the platform's headline
+    differentiator.
+
+    Two-pass flow: the first call (follow_up_question/follow_up_answer
+    both omitted) may come back with status="follow_up_needed" instead of
+    a score -- the frontend shows that question, collects one more
+    free-text response, and calls again with follow_up_question (echoed
+    back verbatim) and follow_up_answer filled in for final scoring. The
+    daily submission counter only increments once scoring is actually
+    final, so a follow-up round doesn't cost the student two submissions
+    for one logical answer.
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
+
+    if u["submissions"] >= FREE_DAILY_SUBMISSIONS and u["tier"] == "free":
+        raise HTTPException(
+            429,
+            f"Daily free submission limit ({FREE_DAILY_SUBMISSIONS}) reached. "
+            "Upgrade to keep practicing today.",
+        )
+
+    problem = get_problem(req.problem_id)
+    if not problem or problem.get("track") != "case":
+        raise HTTPException(404, "Case problem not found")
+
+    if not problem["is_free"] and u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "This problem is part of the Pro problem bank (₹199/mo). "
+            "Free tier includes a curated sample -- upgrade to unlock all problems.",
+        )
+
+    try:
+        result = llm.case_feedback(
+            user_id=user_id,
+            problem=problem,
+            answer=req.answer,
+            follow_up_question=req.follow_up_question,
+            follow_up_answer=req.follow_up_answer,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Case feedback unavailable right now ({e}).")
+
+    if result["status"] == "final":
+        users_module.increment_submission(user_id)
+        # No single boolean "correct" for a rubric-scored written answer --
+        # reuse the existing submissions table (shared by the solved-by-
+        # category charts and per-user history) with a pass threshold, so
+        # this track shows up in the same admin/user views without a
+        # parallel table just for its own history.
+        problems_module.record_submission(user_id, problem["id"], (result.get("score") or 0) >= 70)
+
+    return result
 
 
 INTRO_QUESTION = (
@@ -717,10 +803,14 @@ def api_admin_generate_batch(req: GenerateBatchRequest, request: Request):
     the last batch; it's also callable by hand for an out-of-cycle batch.
     """
     _require_admin(request)
-    if req.track not in ("sql", "python"):
-        raise HTTPException(400, "track must be 'sql' or 'python'")
+    if req.track not in ("sql", "python", "case"):
+        raise HTTPException(400, "track must be 'sql', 'python', or 'case'")
     is_python = req.track == "python"
-    target_topics = req.topics or (py_topics.PY_GRADEABLE_TOPICS if is_python else topics.GRADEABLE_TOPICS)
+    is_case = req.track == "case"
+    if is_case:
+        target_topics = req.topics or case_topics.CASE_TOPICS
+    else:
+        target_topics = req.topics or (py_topics.PY_GRADEABLE_TOPICS if is_python else topics.GRADEABLE_TOPICS)
 
     # Statistics and pandas/numpy are topic vocabularies that ride the
     # Python track's E2B grading (see stats_topics.py/data_lib_topics.py),
@@ -736,8 +826,23 @@ def api_admin_generate_batch(req: GenerateBatchRequest, request: Request):
         elif all(t in data_lib_topics.DATA_LIBRARY_TOPICS for t in req.topics):
             python_system_prompt = llm.DATA_LIB_PYTHON_BATCH_SYSTEM_PROMPT
 
+    # Same swap-in pattern for the Business Case track's two lenses (DA/DE
+    # -- see case_topics.py): defaults to the DA-flavored prompt unless
+    # the caller explicitly asked for topics entirely within the DE list.
+    case_system_prompt = None
+    if is_case and req.topics and all(t in case_topics.CASE_DE_TOPICS for t in req.topics):
+        case_system_prompt = llm.CASE_DE_BATCH_SYSTEM_PROMPT
+
     try:
-        if is_python:
+        if is_case:
+            result = llm.generate_case_batch(
+                user_id="admin",
+                topics=target_topics,
+                count=req.count,
+                existing_titles=problems_module.list_existing_titles(),
+                system_prompt=case_system_prompt,
+            )
+        elif is_python:
             result = llm.generate_python_problem_batch(
                 user_id="admin",
                 topics=target_topics,

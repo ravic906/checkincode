@@ -66,6 +66,7 @@ const STATS_TOPICS = new Set([
   "Sampling & Bias",
 ]);
 function categoryBucket(track, topic) {
+  if (track === "case") return "case";
   if (track !== "python") return "sql";
   if (PANDAS_TOPICS.has(topic)) return "pandas";
   if (NUMPY_TOPICS.has(topic)) return "numpy";
@@ -79,6 +80,7 @@ const CATEGORY_META = {
   stats: { label: "Statistics", color: "#b083f0" },
   pandas: { label: "Pandas", color: "var(--amber)" },
   numpy: { label: "NumPy", color: "var(--red)" },
+  case: { label: "Business Case", color: "#e07b39" },
 };
 
 // Small SVG pie chart from {sql, python, stats, pandas, numpy} counts,

@@ -35,7 +35,9 @@ import topics
 import py_topics
 import stats_topics
 import data_lib_topics
+import case_topics
 import pysandbox
+import llm
 
 # Above this title-similarity ratio, a draft is treated as a near-duplicate
 # of an existing problem and rejected -- catches "Employees Earning More
@@ -2451,7 +2453,7 @@ def list_existing_canonical_content(track: str) -> set[str]:
     """Normalized canonical_sql/canonical_solution for every existing
     problem on this track (live or pending) -- the structural-duplicate
     counterpart to list_existing_titles()'s wording-based check."""
-    field = "canonical_sql" if track == "sql" else "canonical_solution"
+    field = "canonical_sql" if track == "sql" else "canonical_solution" if track == "python" else "case_prompt"
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2516,11 +2518,13 @@ def record_submission(user_id: str, problem_id: str, correct: bool):
 
 
 def _category_bucket(track: str, topic: str) -> str:
-    """Buckets a (track, topic) pair into one of the five content
-    categories shown on the admin dashboard's solved-by-category chart --
-    pandas/numpy/stats are topic vocabularies within track='python' (see
+    """Buckets a (track, topic) pair into one of the content categories
+    shown on the admin dashboard's solved-by-category chart -- pandas/
+    numpy/stats are topic vocabularies within track='python' (see
     data_lib_topics.py / stats_topics.py), not their own track, so
     distinguishing them means checking topic, not just track."""
+    if track == "case":
+        return "case"
     if track != "python":
         return "sql"
     if topic in data_lib_topics.DATA_LIBRARY_TOPICS:
@@ -2546,7 +2550,7 @@ def get_platform_solved_breakdown() -> dict:
                 """
             )
             rows = cur.fetchall()
-    counts = {"sql": 0, "python": 0, "stats": 0, "pandas": 0, "numpy": 0}
+    counts = {"sql": 0, "python": 0, "stats": 0, "pandas": 0, "numpy": 0, "case": 0}
     for r in rows:
         counts[_category_bucket(r["track"], r["topic"])] += 1
     return counts
@@ -2628,6 +2632,8 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     """
     if track == "python":
         required = ["title", "difficulty", "topic", "tags", "description", "starter_code", "function_signature", "test_code", "canonical_solution"]
+    elif track == "case":
+        required = ["title", "difficulty", "topic", "tags", "case_prompt", "rubric_points", "sample_strong_answer"]
     else:
         # order_matters is deliberately not required here -- GPT-4o-mini
         # reliably omits it in larger batches despite the prompt asking
@@ -2649,6 +2655,8 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     # rather than needing a 'stats' track value.
     if track == "python":
         gradeable_topics = py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+    elif track == "case":
+        gradeable_topics = case_topics.CASE_TOPICS
     else:
         gradeable_topics = topics.GRADEABLE_TOPICS
     if draft["topic"] not in gradeable_topics:
@@ -2685,7 +2693,7 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
     # a reworded title over the literal same query/solution (found this
     # exact defect twice in the live bank: same LEFT JOIN under two
     # titles, same word-extraction function under two titles).
-    content_field = "canonical_sql" if track == "sql" else "canonical_solution"
+    content_field = "canonical_sql" if track == "sql" else "canonical_solution" if track == "python" else "case_prompt"
     draft_normalized = _normalize_code_structure(draft.get(content_field) or "")
     if draft_normalized and draft_normalized in list_existing_canonical_content(track):
         raise InvalidDraftProblem(
@@ -2723,6 +2731,26 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
                 "test_code doesn't actually verify correctness -- a deliberately wrong "
                 "stub implementation passed it anyway."
             )
+    elif track == "case":
+        # No execution to validate against -- instead, self-consistency:
+        # score the draft's own sample_strong_answer against its own
+        # rubric_points via the same judge that will grade real student
+        # answers, and require it to clear a threshold. A rubric with only
+        # one thin point, or a sample answer that doesn't actually address
+        # the scenario, fails this; a well-formed draft passes.
+        if not isinstance(draft["rubric_points"], list) or len(draft["rubric_points"]) < 3:
+            raise InvalidDraftProblem("rubric_points must be a list of at least 3 concrete points.")
+        try:
+            ok, reason = llm.validate_case_draft_quality(
+                case_prompt=draft["case_prompt"],
+                case_context=draft.get("case_context"),
+                rubric_points=draft["rubric_points"],
+                sample_strong_answer=draft["sample_strong_answer"],
+            )
+        except Exception as e:
+            raise InvalidDraftProblem(f"Rubric self-consistency check failed to run: {e}")
+        if not ok:
+            raise InvalidDraftProblem(f"sample_strong_answer doesn't clearly hit its own rubric_points: {reason}")
     else:
         try:
             sandbox.validate_student_sql(draft["canonical_sql"])
@@ -2741,6 +2769,7 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
             raise InvalidDraftProblem(f"canonical_sql failed to execute: {e}")
 
     problem_id = f"generated-{uuid.uuid4().hex[:8]}"
+    description = draft.get("description") or draft.get("case_prompt", "")
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2749,16 +2778,20 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
                     (id, title, difficulty, topic, tags, description, track,
                      schema_sql, seed_sql, canonical_sql, order_matters,
                      starter_code, function_signature, test_code, canonical_solution,
+                     case_prompt, case_context, rubric_points, sample_strong_answer,
                      status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_review')
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_review')
                 """,
                 (
                     problem_id, draft["title"], draft["difficulty"], draft["topic"],
-                    json.dumps(draft["tags"]), draft["description"].strip(), track,
+                    json.dumps(draft["tags"]), description.strip(), track,
                     draft.get("schema_sql"), draft.get("seed_sql"), draft.get("canonical_sql"),
                     bool(draft.get("order_matters", False)),
                     draft.get("starter_code"), draft.get("function_signature"),
                     draft.get("test_code"), draft.get("canonical_solution"),
+                    draft.get("case_prompt"), draft.get("case_context"),
+                    json.dumps(draft["rubric_points"]) if draft.get("rubric_points") is not None else None,
+                    draft.get("sample_strong_answer"),
                 ),
             )
     return problem_id

@@ -292,6 +292,47 @@ table.data-table td.null-val { color: var(--muted); font-style: italic; }
 }
 .editor-toolbar .actions { display: flex; gap: 8px; }
 
+.case-answer-section { padding: 18px 24px; flex-shrink: 0; }
+.case-answer-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+}
+.case-followup {
+  max-width: 720px;
+  padding: 18px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 0 24px;
+}
+.case-followup-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.case-followup-question { font-size: 14.5px; margin: 0 0 14px; }
+.case-followup .case-answer-textarea { min-height: 120px; margin-bottom: 12px; }
+.case-feedback-report { padding: 24px; }
+.rubric-checklist { margin-top: 8px; }
+.rubric-checklist ul { list-style: none; margin: 0; padding: 0; }
+.rubric-checklist li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.rubric-checklist li:last-child { border-bottom: none; }
+.rubric-checklist li.rubric-hit { color: var(--text); }
+.rubric-checklist li.rubric-hit::marker { color: #38c172; }
+.rubric-checklist li.rubric-missed { color: var(--muted); }
+
 button.run-btn, button.submit-btn {
   border: none;
   border-radius: 8px;

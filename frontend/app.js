@@ -35,7 +35,7 @@ async function api(path, options = {}) {
 
 let allProblems = [];
 let currentProblem = null;
-let currentTrack = "sql"; // "sql" | "python" -- which track's problem list is showing
+let currentTrack = "sql"; // "sql" | "python" | "case" -- which track's problem list is showing
 let monacoEditor = null;
 let currentTier = "free"; // kept in sync by refreshTierBadge(); Ask Phoenix reads this to decide chat-vs-upsell
 
@@ -54,9 +54,11 @@ function updateSignInGatedUI() {
 function updateAskPhoenixFabVisibility() {
   // Only makes sense while an actual problem is loaded and gradeable --
   // hidden on the home/interview screens and on the bare practice-screen
-  // empty state.
+  // empty state. Also hidden on the Business Case track -- the whole
+  // point of that round is figuring it out yourself; a guided-hint chat
+  // would undermine the skill it's meant to test.
   document.getElementById("askPhoenixFab").style.display =
-    (_onPracticeScreen && currentProblem) ? "flex" : "none";
+    (_onPracticeScreen && currentProblem && currentProblem.track !== "case") ? "flex" : "none";
 }
 
 // Keeps ?track=&problem= in the URL in sync with what's on screen, purely
@@ -123,6 +125,20 @@ function showPythonTrack() {
   populateTagFilter();
   renderProblemList();
   syncUrl({ track: "python" });
+}
+function showCaseTrack() {
+  currentTrack = "case";
+  _resetPracticeWorkspace();
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("practiceLayout").style.display = "flex";
+  document.getElementById("interviewScreen").style.display = "none";
+  _onPracticeScreen = true;
+  updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
+  populateTopicFilter();
+  populateTagFilter();
+  renderProblemList();
+  syncUrl({ track: "case" });
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
@@ -554,6 +570,10 @@ async function loadProblem(id) {
   updateAskPhoenixFabVisibility();
   syncUrl({ track: currentTrack, problem: id });
 
+  if (p.track === "case") {
+    return renderCaseProblem(p);
+  }
+
   if (p.track === "python") {
     document.getElementById("workspace").innerHTML = `
       <div class="problem-header">
@@ -608,6 +628,124 @@ async function loadProblem(id) {
 
   document.getElementById("runBtn").onclick = () => runQuery(false);
   document.getElementById("submitBtn").onclick = () => runQuery(true);
+}
+
+// Business Case track -- no Monaco, no execution grading. A plain
+// textarea + "Submit for Feedback", scored by an AI rubric judge
+// (POST /api/case/submit). Two-pass: the first submit may come back
+// asking one follow-up question instead of a final score; the frontend
+// then shows a second, smaller textarea for just that follow-up.
+function renderCaseProblem(p) {
+  document.getElementById("workspace").innerHTML = `
+    <div class="problem-header">
+      <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
+      <div class="problem-description markdown-content">${renderMarkdown(p.case_prompt)}</div>
+      ${p.case_context ? `<div class="schema-block">${escapeHtml(p.case_context)}</div>` : ""}
+    </div>
+    <div class="case-answer-section">
+      <div class="editor-toolbar">
+        <strong>Your Answer</strong>
+        <div class="actions">
+          <button class="submit-btn" id="caseSubmitBtn">Submit for Feedback</button>
+        </div>
+      </div>
+      <textarea id="caseAnswer" class="case-answer-textarea" placeholder="Write your answer here -- a few focused paragraphs, not a full report."></textarea>
+    </div>
+    <div class="results-section" id="resultsSection"></div>
+  `;
+  document.getElementById("caseSubmitBtn").onclick = () => submitCaseAnswer(p.id);
+}
+
+async function submitCaseAnswer(problemId) {
+  const answerEl = document.getElementById("caseAnswer");
+  const answer = answerEl.value.trim();
+  if (!answer) return;
+  const resultsSection = document.getElementById("resultsSection");
+  const btn = document.getElementById("caseSubmitBtn");
+  btn.disabled = true;
+  resultsSection.innerHTML = `<div class="loading-dots">Reading your answer…</div>`;
+
+  try {
+    const result = await api("/api/case/submit", {
+      method: "POST",
+      body: JSON.stringify({ problem_id: problemId, answer }),
+    });
+    if (result.status === "follow_up_needed") {
+      renderCaseFollowUp(problemId, answer, result.follow_up_question);
+    } else {
+      renderCaseFeedback(result);
+    }
+  } catch (e) {
+    resultsSection.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderCaseFollowUp(problemId, originalAnswer, followUpQuestion) {
+  const resultsSection = document.getElementById("resultsSection");
+  resultsSection.innerHTML = `
+    <div class="case-followup">
+      <div class="case-followup-label">One follow-up before final feedback</div>
+      <p class="case-followup-question">${renderMarkdownInline(escapeHtml(followUpQuestion))}</p>
+      <textarea id="caseFollowUpAnswer" class="case-answer-textarea" placeholder="Your response…"></textarea>
+      <button class="submit-btn" id="caseFollowUpSubmitBtn">Submit Follow-up</button>
+    </div>
+  `;
+  document.getElementById("caseFollowUpSubmitBtn").onclick = async () => {
+    const followUpAnswer = document.getElementById("caseFollowUpAnswer").value.trim();
+    if (!followUpAnswer) return;
+    const btn = document.getElementById("caseFollowUpSubmitBtn");
+    btn.disabled = true;
+    resultsSection.insertAdjacentHTML("beforeend", `<div class="loading-dots">Finalizing feedback…</div>`);
+    try {
+      const result = await api("/api/case/submit", {
+        method: "POST",
+        body: JSON.stringify({
+          problem_id: problemId, answer: originalAnswer,
+          follow_up_question: followUpQuestion, follow_up_answer: followUpAnswer,
+        }),
+      });
+      renderCaseFeedback(result);
+    } catch (e) {
+      resultsSection.innerHTML = `<div class="error-banner">${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+function renderCaseFeedback(result) {
+  const resultsSection = document.getElementById("resultsSection");
+  const scoreHtml = typeof result.score === "number"
+    ? `<div class="feedback-score">${result.score}<span>/100</span></div>`
+    : "";
+  resultsSection.innerHTML = `
+    <div class="feedback-report case-feedback-report">
+      <div class="feedback-header">
+        <h3>Feedback</h3>
+        ${scoreHtml}
+      </div>
+      <p class="feedback-summary">${escapeHtml(result.overall_summary || "")}</p>
+      <div class="feedback-cols">
+        <div class="feedback-col strengths">
+          <h3><span class="feedback-col-icon">＋</span>Strengths</h3>
+          <ul>${(result.strengths || []).map(s => `<li>${escapeHtml(s)}</li>`).join("") || "<li>—</li>"}</ul>
+        </div>
+        <div class="feedback-col weaknesses">
+          <h3><span class="feedback-col-icon">－</span>Weaknesses</h3>
+          <ul>${(result.weaknesses || []).map(s => `<li>${escapeHtml(s)}</li>`).join("") || "<li>—</li>"}</ul>
+        </div>
+      </div>
+      <div class="rubric-checklist">
+        <h3 class="feedback-section-title">Rubric</h3>
+        <ul>
+          ${(result.rubric_points_hit || []).map(r => `<li class="rubric-hit">✓ ${escapeHtml(r)}</li>`).join("")}
+          ${(result.rubric_points_missed || []).map(r => `<li class="rubric-missed">✗ ${escapeHtml(r)}</li>`).join("")}
+        </ul>
+      </div>
+    </div>
+  `;
 }
 
 function mountEditor(language, seedValue) {
@@ -900,6 +1038,7 @@ async function init() {
   document.getElementById("brandHome").onclick = showHome;
   document.getElementById("trackSql").onclick = showSqlTrack;
   document.getElementById("trackPython").onclick = showPythonTrack;
+  document.getElementById("trackCase").onclick = showCaseTrack;
   document.getElementById("trackInterview").onclick = () => {
     showInterviewScreen();
     if (window.renderInterviewSetup) window.renderInterviewSetup();
@@ -915,6 +1054,8 @@ async function init() {
     showPythonTrack();
   } else if (savedTrack === "sql") {
     showSqlTrack();
+  } else if (savedTrack === "case") {
+    showCaseTrack();
   } else {
     showHome();
   }

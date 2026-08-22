@@ -1379,3 +1379,266 @@ def generate_python_problem_batch(*, user_id: str, topics: list[str], count: int
         except (json.JSONDecodeError, KeyError) as e:
             last_parse_error = e
     raise RuntimeError(f"Model didn't return valid JSON after 3 attempts ({last_parse_error}).")
+
+
+# ---------------------------------------------------------------------------
+# Business Case track -- open-ended analytical-reasoning questions with no
+# single verifiable right answer (metric design, root-cause investigation,
+# pipeline trade-offs), graded by a rubric-based AI judge instead of
+# execution. Two lenses (DA/DE) riding the same track='case' storage and
+# grading, exactly like stats/pandas/numpy are topic lenses within
+# track='python' rather than separate tracks -- see case_topics.py.
+# ---------------------------------------------------------------------------
+
+_CASE_BATCH_SHARED_RULES = (
+    "There is no single verifiable right answer here -- these are graded "
+    "by a rubric-based AI judge scoring a candidate's written response, "
+    "not by execution. Each problem needs:\n"
+    "- title\n- difficulty (easy/medium/hard)\n"
+    "- topic (exactly one from the allowed list, exact spelling)\n"
+    "- tags (list of strings)\n"
+    "- case_prompt: the full scenario, written the way a real interviewer "
+    "would actually present it in the moment -- concrete numbers and "
+    "context, never abstract or generic. Answerable in a focused written "
+    "response (a few paragraphs), not a full slide deck or a multi-week "
+    "project plan.\n"
+    "- case_context: any supporting data the candidate needs (a small "
+    "table of numbers, a metric definition, a snippet of dashboard "
+    "context) as a plain string, or null if case_prompt is fully "
+    "self-contained on its own.\n"
+    "- rubric_points: a list of 4-7 CONCRETE things a strong answer "
+    "should cover -- specific enough to actually check an answer against "
+    "(e.g. \"considers whether the metric drop could be a measurement/"
+    "instrumentation artifact before assuming a real behavior change\"), "
+    "never vague platitudes like \"shows good communication\" or "
+    "\"demonstrates structured thinking.\"\n"
+    "- sample_strong_answer: an answer that would score well against your "
+    "own rubric_points above -- internal-only, never shown to students, "
+    "used solely to self-validate this draft before it goes live.\n\n"
+    "Vary the business domain across the batch (e-commerce, fintech, "
+    "marketplace/gig platforms, social/media, an AI or GenAI product, "
+    "B2B SaaS, etc.) rather than reusing the same company framing "
+    "repeatedly, and don't draft the same underlying scenario twice under "
+    "a different label.\n\n"
+    "Respond with ONLY a JSON object, no other text: "
+    '{"problems": [{"title": "...", "difficulty": "...", "topic": "...", '
+    '"tags": [...], "case_prompt": "...", "case_context": "..."|null, '
+    '"rubric_points": ["...", ...], "sample_strong_answer": "..."}, ...]}'
+)
+
+CASE_DA_BATCH_SYSTEM_PROMPT = (
+    "You write realistic business-case interview questions for a "
+    "candidate preparing for Data Analyst interviews at companies like "
+    "Uber, Meta, Google, and peers -- the round that decides most DA "
+    "offers: metric design, diagnosing a metric that moved, designing an "
+    "A/B test, reasoning about growth/retention, or a product/prioritization "
+    "trade-off. This is the kind of open-ended reasoning a SQL query or a "
+    "coding exercise can't test at all.\n\n" + _CASE_BATCH_SHARED_RULES
+)
+
+CASE_DE_BATCH_SYSTEM_PROMPT = (
+    "You write realistic business-case interview questions for a "
+    "candidate preparing for Data Engineer interviews -- system-design-"
+    "style trade-off discussions: how to architect a pipeline, batch vs. "
+    "streaming decisions, schema/modeling trade-offs, data quality/"
+    "validation strategy, or scaling a system under real constraints "
+    "(cost, latency, team size). Test genuine engineering judgment and "
+    "trade-off reasoning, not a trivia question with one memorized "
+    "correct term.\n\n" + _CASE_BATCH_SHARED_RULES
+)
+
+
+def generate_case_batch(*, user_id: str, topics: list[str], count: int, existing_titles: list[str] | None = None, system_prompt: str | None = None) -> dict:
+    """
+    Business Case equivalent of generate_python_problem_batch() -- same
+    shape, same JSON-parse-with-retry machinery. `system_prompt` defaults
+    to the DA-flavored prompt; callers pass CASE_DE_BATCH_SYSTEM_PROMPT
+    for a DE-flavored batch, the same swap-in pattern main.py already
+    uses for stats/pandas/numpy Python batches.
+    """
+    system_prompt = system_prompt or CASE_DA_BATCH_SYSTEM_PROMPT
+    user_prompt = (
+        f"Draft {count} new business-case practice problems spread across "
+        f"these topics (cover each at least once if count allows): {', '.join(topics)}.\n"
+        "Mix difficulties (easy/medium/hard) across the batch rather than "
+        "making them all one level."
+    )
+    if existing_titles:
+        titles_block = "\n".join(f"- {t}" for t in existing_titles)
+        user_prompt += (
+            "\n\nThese problems already exist -- do not draft anything "
+            "that's the same scenario under a different name:\n" + titles_block
+        )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    last_parse_error = None
+    for attempt in range(3):
+        result = _call_chat_with_retry(
+            user_id=user_id, problem_id="admin-case-problem-batch", messages=messages,
+            max_tokens=min(6000, max(1500, count * 550)), json_mode=False,
+            timeout=120, temperature=0.8,
+        )
+        try:
+            parsed = _parse_json_reply(result["reply"])
+            return {"problems": parsed.get("problems", []), "usage": result["usage"]}
+        except (json.JSONDecodeError, KeyError) as e:
+            last_parse_error = e
+    raise RuntimeError(f"Model didn't return valid JSON after 3 attempts ({last_parse_error}).")
+
+
+def validate_case_draft_quality(*, case_prompt: str, case_context: str | None, rubric_points: list[str], sample_strong_answer: str) -> tuple[bool, str]:
+    """
+    Self-consistency gate for a newly-drafted case problem, run once at
+    insert time (see problems.insert_pending_draft): does
+    sample_strong_answer actually hit its own rubric_points well? Uses a
+    plain hit-count rather than the full case_feedback machinery below --
+    no follow-up-question logic is needed for an internal quality check.
+    Returns (passed, reason). Unlike other validators' "benefit of the
+    doubt on infra hiccups" stance, lets a parse/call failure propagate to
+    the caller as a rejection -- a rubric that can't even be confirmed
+    against its own sample answer shouldn't ship regardless of cause.
+    """
+    rubric_block = "\n".join(f"- {p}" for p in rubric_points)
+    context_block = f"\nSupporting context: {case_context}" if case_context else ""
+    user_prompt = (
+        f"Case prompt: {case_prompt}{context_block}\n\n"
+        f"Rubric points:\n{rubric_block}\n\n"
+        f"Sample answer to check:\n{sample_strong_answer}"
+    )
+    system_prompt = (
+        "You are checking whether a SAMPLE answer clearly hits the rubric "
+        "points listed, as a quality gate before this question goes live "
+        "-- you are NOT grading a real candidate. Respond with ONLY a "
+        'JSON object: {"points_hit": <int, how many rubric points this '
+        'answer clearly addresses>, "total_points": <int, total rubric '
+        'points given>, "reason": "<one sentence>"}'
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    result = _call_chat_with_retry(
+        user_id="admin", problem_id="case-draft-validation", messages=messages,
+        max_tokens=300, json_mode=True,
+    )
+    parsed = _parse_json_reply(result["reply"])
+    total = parsed.get("total_points") or len(rubric_points)
+    hit = parsed.get("points_hit", 0)
+    passed = total > 0 and (hit / total) >= 0.7
+    return passed, parsed.get("reason", f"{hit}/{total} rubric points hit")
+
+
+CASE_FEEDBACK_SYSTEM_PROMPT = (
+    "You are an experienced interviewer scoring a candidate's written "
+    "answer to a business-case question, against a specific rubric. "
+    "Score substance and analytical rigor, never length or polish -- a "
+    "short, sharp answer that hits the real analytical points beats a "
+    "long one that circles around them without landing anywhere.\n\n"
+    "rubric_points_hit and rubric_points_missed together MUST exactly "
+    "partition the full rubric you're given -- every point appears "
+    "verbatim in exactly one of the two lists, never both, never "
+    "neither.\n\n"
+    "If -- and only if -- the answer is genuinely borderline (covers some "
+    "but not all of the rubric, in a way where ONE targeted follow-up "
+    "question could reasonably let the candidate close the gap, the way "
+    "a real interviewer probes rather than immediately ending the round) "
+    "set needs_follow_up to true and write that ONE question in "
+    "follow_up_question. Do NOT ask a follow-up for an answer that's "
+    "already clearly strong (nothing meaningful left to probe) or "
+    "clearly weak (a follow-up wouldn't salvage it) -- reserve it "
+    "strictly for the genuinely in-between case. When you are told this "
+    "is final scoring (a follow-up was already asked and answered), you "
+    "MUST set needs_follow_up to false regardless of how the answer "
+    "reads -- there is no second follow-up round.\n\n"
+    "Respond with ONLY a JSON object, no other text: "
+    '{"needs_follow_up": bool, "follow_up_question": "..."|null, '
+    '"score": <integer 0-100>, "overall_summary": "<2-3 sentences>", '
+    '"rubric_points_hit": ["...", ...], "rubric_points_missed": ["...", ...], '
+    '"strengths": ["...", ...], "weaknesses": ["...", ...]}'
+)
+
+
+def case_feedback(
+    *,
+    user_id: str,
+    problem: dict,
+    answer: str,
+    follow_up_question: str | None = None,
+    follow_up_answer: str | None = None,
+) -> dict:
+    """
+    Two-pass rubric grading for one Business Case answer.
+
+    First call (follow_up_question/follow_up_answer both None): scores
+    `answer` against problem['rubric_points']. If the judge decides the
+    answer is genuinely borderline, returns
+    {"status": "follow_up_needed", "follow_up_question": str, "usage": {...}}
+    with no score yet -- the caller shows this question to the student,
+    collects one more free-text response, and calls again.
+
+    Second call (both follow_up_question and follow_up_answer provided --
+    the caller echoes back the exact question it received from the first
+    call, stateless rather than needing server-side session storage):
+    produces a FINAL score informed by both the original answer and the
+    follow-up response. The prompt explicitly tells the model this is
+    final scoring so it can never loop into asking a second follow-up.
+
+    Returns either the follow-up shape above, or:
+    {"status": "final", "score": int, "overall_summary": str,
+     "rubric_points_hit": [...], "rubric_points_missed": [...],
+     "strengths": [...], "weaknesses": [...], "usage": {...}}
+    """
+    is_final_pass = follow_up_question is not None and follow_up_answer is not None
+
+    parts = [f"Case prompt: {problem['case_prompt']}"]
+    if problem.get("case_context"):
+        parts.append(f"Supporting context: {problem['case_context']}")
+    rubric_block = "\n".join(f"- {p}" for p in problem["rubric_points"])
+    parts.append(f"Rubric points to check for:\n{rubric_block}")
+    parts.append(f"Candidate's answer:\n{answer}")
+    if is_final_pass:
+        parts.append(f"You previously asked this follow-up question: {follow_up_question}")
+        parts.append(f"Candidate's follow-up response: {follow_up_answer}")
+        parts.append(
+            "This is now FINAL scoring -- a follow-up has already been asked and "
+            "answered. Do not ask another follow-up under any circumstances; "
+            "incorporate the follow-up response into one final judgment."
+        )
+
+    messages = [
+        {"role": "system", "content": CASE_FEEDBACK_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(parts)},
+    ]
+    result = _call_chat_with_retry(
+        user_id=user_id, problem_id=f"case-{problem['id']}", messages=messages,
+        max_tokens=1200, json_mode=True,
+    )
+    try:
+        parsed = _parse_json_reply(result["reply"])
+    except (json.JSONDecodeError, KeyError):
+        parsed = {
+            "needs_follow_up": False, "score": None,
+            "overall_summary": result["reply"],
+            "rubric_points_hit": [], "rubric_points_missed": list(problem["rubric_points"]),
+            "strengths": [], "weaknesses": [],
+        }
+
+    if not is_final_pass and parsed.get("needs_follow_up") and parsed.get("follow_up_question"):
+        return {
+            "status": "follow_up_needed",
+            "follow_up_question": parsed["follow_up_question"],
+            "usage": result["usage"],
+        }
+
+    return {
+        "status": "final",
+        "score": parsed.get("score"),
+        "overall_summary": parsed.get("overall_summary", ""),
+        "rubric_points_hit": parsed.get("rubric_points_hit", []),
+        "rubric_points_missed": parsed.get("rubric_points_missed", []),
+        "strengths": parsed.get("strengths", []),
+        "weaknesses": parsed.get("weaknesses", []),
+        "usage": result["usage"],
+    }

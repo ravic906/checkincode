@@ -145,6 +145,20 @@ def init_schema():
             cur.execute("""ALTER TABLE problems ALTER COLUMN schema_sql DROP NOT NULL""")
             cur.execute("""ALTER TABLE problems ALTER COLUMN seed_sql DROP NOT NULL""")
             cur.execute("""ALTER TABLE problems ALTER COLUMN canonical_sql DROP NOT NULL""")
+            # Business Case track (track='case') -- open-ended analytical-
+            # reasoning questions with no single verifiable answer, graded
+            # by an AI rubric judge (llm.case_feedback) rather than
+            # execution. Same shared-table-with-nullable-columns pattern as
+            # the Python columns above: case_prompt is the scenario shown
+            # to students, case_context is optional supporting data,
+            # rubric_points is what a strong answer should hit (JSONB list
+            # of strings), sample_strong_answer is internal-only -- used to
+            # self-validate a draft's rubric at generation time, never
+            # shown to students.
+            cur.execute("""ALTER TABLE problems ADD COLUMN IF NOT EXISTS case_prompt TEXT""")
+            cur.execute("""ALTER TABLE problems ADD COLUMN IF NOT EXISTS case_context TEXT""")
+            cur.execute("""ALTER TABLE problems ADD COLUMN IF NOT EXISTS rubric_points JSONB""")
+            cur.execute("""ALTER TABLE problems ADD COLUMN IF NOT EXISTS sample_strong_answer TEXT""")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS content_cadence (
                     id INTEGER PRIMARY KEY DEFAULT 1,
