@@ -1384,8 +1384,7 @@ def api_admin_check_test_discriminates(problem_id: str, request: Request):
     return {"id": problem_id, "discriminates": discriminates}
 
 
-@app.post("/api/admin/problems/{problem_id}/compute-examples")
-def api_admin_compute_examples(problem_id: str, request: Request):
+def _compute_examples_for_problem(problem_id: str, p: dict) -> dict | list | None:
     """
     Computes and stores the real sample input/output shown to students on
     the problem page. For SQL this is just the already-cached real
@@ -1394,13 +1393,12 @@ def api_admin_compute_examples(problem_id: str, request: Request):
     instrumented, capturing real (args, result) pairs from real passing
     assertions (see pysandbox.extract_examples). Never a separately
     hand-written example, so it can't drift from what the problem
-    actually does.
+    actually does. No-op (returns None) for track='case', which has no
+    sample-I/O concept. Shared by the compute-examples endpoint and the
+    approve endpoint (which calls this automatically before running the
+    content-quality audit, so a fresh approval's audit isn't spuriously
+    flagged for an example that just hasn't been computed yet).
     """
-    _require_admin(request)
-    p = problems_module.get_problem(problem_id)
-    if not p:
-        raise HTTPException(404, "Problem not found")
-
     if p.get("track") == "python":
         examples = pysandbox.extract_examples(
             canonical_solution=p["canonical_solution"],
@@ -1408,7 +1406,10 @@ def api_admin_compute_examples(problem_id: str, request: Request):
             function_signature=p["function_signature"],
         )
         problems_module.set_problem_examples(problem_id, examples)
-        return {"id": problem_id, "track": "python", "examples": examples}
+        return examples
+
+    if p.get("track") == "case":
+        return None
 
     if problem_id in _EXPECTED_CACHE:
         cols, rows = _EXPECTED_CACHE[problem_id]
@@ -1416,7 +1417,17 @@ def api_admin_compute_examples(problem_id: str, request: Request):
         cols, rows, _ = sandbox.compute_expected_output(p)
     example = {"columns": cols, "rows": [[sandbox._normalize_cell(v) for v in row] for row in rows[:3]]}
     problems_module.set_problem_examples(problem_id, example)
-    return {"id": problem_id, "track": "sql", "examples": example}
+    return example
+
+
+@app.post("/api/admin/problems/{problem_id}/compute-examples")
+def api_admin_compute_examples(problem_id: str, request: Request):
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    examples = _compute_examples_for_problem(problem_id, p)
+    return {"id": problem_id, "track": p.get("track", "sql"), "examples": examples}
 
 
 @app.post("/api/admin/problems/{problem_id}/approve")
@@ -1433,6 +1444,16 @@ def api_admin_approve(problem_id: str, request: Request):
     if approved.get("track", "sql") == "sql":
         cols, rows, _ = sandbox.compute_expected_output(approved)
         _EXPECTED_CACHE[problem_id] = (cols, rows)
+
+    # Compute real sample I/O before auditing (not after) -- otherwise
+    # every fresh approval's audit would spuriously flag "no example yet"
+    # for something that just hasn't been computed, rather than something
+    # actually wrong with the problem.
+    try:
+        _compute_examples_for_problem(problem_id, approved)
+        approved = problems_module.get_problem(problem_id)
+    except Exception:
+        pass  # nice-to-have; a failure here shouldn't block approval or the audit below
 
     # Content-quality audit is now standard for every addition to the
     # bank -- run it the moment a problem goes live, rather than as an
