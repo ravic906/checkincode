@@ -595,6 +595,7 @@ def audit_problem_quality(
     crash the whole batch.
     """
     has_ask_phoenix = ask_phoenix_normal is not None and ask_phoenix_edge is not None
+    is_case = problem.get("track") == "case"
 
     if problem.get("track") == "python":
         content_block = (
@@ -696,38 +697,42 @@ def audit_problem_quality(
         "what the canonical solution actually has to do? Suggest a "
         "replacement (exactly one of easy/medium/hard) only if you think "
         "the current label is wrong.\n\n"
-        "5. sample_io_sane -- READ THIS CAREFULLY. Every Python arg/result "
-        "value here is the output of calling Python's own repr() on a "
-        "real value, always stored as a JSON string, NEVER as a native "
-        "JSON array/object/number. repr() output looks exactly like the "
-        "underlying Python/library syntax, quotes, brackets and all -- "
-        "e.g. all of the following are 100% CORRECT, ordinary repr() "
-        "output and NONE of them are defects: \"[{'a': 1}, {'a': 2}]\" "
-        "(a list of dicts, single-quoted, as a string), \"array([1, 2, "
-        "3])\" (a numpy array), \"np.int64(5)\" or \"np.float64(2.5)\" "
-        "(numpy scalar types), \"'2023-01-01'\" (a date kept as a plain "
-        "string, quotes included), \"defaultdict(<class 'int'>, {'a': "
-        "1})\" (a defaultdict). None of these are formatting mistakes -- "
-        "they are simply what repr() produces for that value's actual "
-        "Python type, and matching the real type (int vs float, str vs "
-        "date object, etc.) is not something to second-guess here.\n\n"
-        "You are ONLY allowed to fail sample_io_sane for one of these "
-        "four reasons -- if your objection is not clearly one of these "
-        "four, you MUST set ok: true instead:\n"
-        "  (a) the example is completely empty/absent when the problem "
-        "shape clearly could have produced one;\n"
-        "  (b) the repr'd value is a raw memory address, i.e. literally "
-        "contains the substring \"object at 0x\";\n"
-        "  (c) the repr'd value is a bare, unconsumed generator, i.e. "
-        "literally contains the substring \"<generator object\";\n"
-        "  (d) the actual numbers/values shown are factually wrong given "
-        "the description and canonical solution (e.g. a claimed sum that "
-        "doesn't add up, or a count that's off) -- not a style, type, or "
-        "quoting objection, an actual wrong-arithmetic objection.\n"
-        "Any complaint about quote style, JSON validity, str-vs-int-vs-"
-        "float typing, numpy/defaultdict/date-as-string reprs, or "
-        "\"should be a list/dict not a string\" is NEVER valid grounds to "
-        "fail this field -- if that's your only objection, set ok: true.\n\n"
+        + (
+            ""
+            if is_case else
+            "5. sample_io_sane -- READ THIS CAREFULLY. Every Python arg/result "
+            "value here is the output of calling Python's own repr() on a "
+            "real value, always stored as a JSON string, NEVER as a native "
+            "JSON array/object/number. repr() output looks exactly like the "
+            "underlying Python/library syntax, quotes, brackets and all -- "
+            "e.g. all of the following are 100% CORRECT, ordinary repr() "
+            "output and NONE of them are defects: \"[{'a': 1}, {'a': 2}]\" "
+            "(a list of dicts, single-quoted, as a string), \"array([1, 2, "
+            "3])\" (a numpy array), \"np.int64(5)\" or \"np.float64(2.5)\" "
+            "(numpy scalar types), \"'2023-01-01'\" (a date kept as a plain "
+            "string, quotes included), \"defaultdict(<class 'int'>, {'a': "
+            "1})\" (a defaultdict). None of these are formatting mistakes -- "
+            "they are simply what repr() produces for that value's actual "
+            "Python type, and matching the real type (int vs float, str vs "
+            "date object, etc.) is not something to second-guess here.\n\n"
+            "You are ONLY allowed to fail sample_io_sane for one of these "
+            "four reasons -- if your objection is not clearly one of these "
+            "four, you MUST set ok: true instead:\n"
+            "  (a) the example is completely empty/absent when the problem "
+            "shape clearly could have produced one;\n"
+            "  (b) the repr'd value is a raw memory address, i.e. literally "
+            "contains the substring \"object at 0x\";\n"
+            "  (c) the repr'd value is a bare, unconsumed generator, i.e. "
+            "literally contains the substring \"<generator object\";\n"
+            "  (d) the actual numbers/values shown are factually wrong given "
+            "the description and canonical solution (e.g. a claimed sum that "
+            "doesn't add up, or a count that's off) -- not a style, type, or "
+            "quoting objection, an actual wrong-arithmetic objection.\n"
+            "Any complaint about quote style, JSON validity, str-vs-int-vs-"
+            "float typing, numpy/defaultdict/date-as-string reprs, or "
+            "\"should be a list/dict not a string\" is NEVER valid grounds to "
+            "fail this field -- if that's your only objection, set ok: true.\n\n"
+        )
         + (
             "6. ask_phoenix_normal_ok / ask_phoenix_edge_ok: judge each Ask "
             "Phoenix transcript independently. Phoenix has two legitimate "
@@ -751,7 +756,7 @@ def audit_problem_quality(
         '"topic_alignment": {"ok": bool, "suggested_topic": "<exact topic>"}, '
         '"description_sufficient": {"ok": bool, "reason": "..."}, '
         '"difficulty_correct": {"ok": bool, "suggested_difficulty": "easy|medium|hard"}, '
-        '"sample_io_sane": {"ok": bool, "reason": "..."}, '
+        + ('' if is_case else '"sample_io_sane": {"ok": bool, "reason": "..."}, ')
         + ('"ask_phoenix_normal_ok": {"ok": bool, "reason": "..."}, '
            '"ask_phoenix_edge_ok": {"ok": bool, "reason": "..."}, ' if has_ask_phoenix else '')
         + '"overall_verdict": "pass|needs_fix", '
