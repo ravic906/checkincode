@@ -915,6 +915,28 @@ def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
     return {"checked": total_checked, "relabeled": relabeled, "usage": usage_totals}
 
 
+class AskPhoenixTestRequest(BaseModel):
+    problem_id: str
+    question: str
+    conversation: list[dict] = []
+
+
+@app.post("/api/admin/ask-phoenix-test")
+def api_admin_ask_phoenix_test(req: AskPhoenixTestRequest, request: Request):
+    """Admin-only, bypasses the Pro-tier gate -- for manually exercising
+    Ask Phoenix with an arbitrary question while debugging/tuning its
+    system prompt, without needing a real paid test account."""
+    _require_admin(request)
+    p = problems_module.get_problem(req.problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    try:
+        result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=req.conversation, question=req.question)
+    except Exception as e:
+        raise HTTPException(502, f"Ask Phoenix unavailable right now ({e}).")
+    return {"answer": result["answer"], "usage": result["usage"]}
+
+
 class AuditBatchRequest(BaseModel):
     ids: list[str]
 
