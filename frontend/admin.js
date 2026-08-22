@@ -32,46 +32,42 @@ async function adminApi(path, options = {}) {
   return res.json();
 }
 
-// Client-side gate: not a real security boundary (this is a static file,
-// its source is always fetchable), but stops an outsider who found the
-// URL from ever seeing real admin UI/data -- someone holding the static
-// token still gets in (needed for the bootstrap grant-admin step below),
-// otherwise this requires a signed-in Clerk account with is_admin=True.
-(async function enforceAdminGate() {
-  if (getToken()) return;
-  try {
-    if (typeof waitForClerk === "function") await waitForClerk();
-  } catch { /* falls through to the redirect below */ }
-  if (typeof isSignedIn !== "function" || !isSignedIn()) {
-    window.location.href = "index.html";
-    return;
-  }
-  try {
-    const clerkToken = await getAuthToken();
-    const res = await fetch(`${ADMIN_API_BASE}/api/usage`, {
-      headers: { Authorization: `Bearer ${clerkToken}` },
-    });
-    const data = await res.json();
-    if (!data.is_admin) window.location.href = "index.html";
-  } catch {
-    window.location.href = "index.html";
-  }
-})();
+// No client-side redirect gate here -- one was tried and removed: it
+// preemptively bounced anyone without a token or admin session away
+// from the page, which broke the bootstrap flow itself (you can't reach
+// the "grant admin" controls if the page kicks you out before you can
+// use them). The real security boundary is server-side: every actual
+// action and every piece of data still requires _require_admin() to
+// pass (static token, or a signed-in is_admin account) -- an outsider
+// can load this page's empty shell, but can't see or do anything real.
 
-// Look up the currently signed-in account's own user_id, to pass to
-// POST /api/admin/set-admin (via curl, with the static token) -- there
-// is deliberately no "grant myself admin" self-service call; only an
-// existing admin (or the bootstrap token) can designate anyone, from
-// the server side, never the account itself.
-async function showMyUserId() {
+// Fills the user_id field with whoever is currently signed in, as a
+// convenience -- the actual grant/revoke still goes through
+// POST /api/admin/set-admin below, which requires the admin token (or an
+// already-admin session) to actually take effect. There is deliberately
+// no call that lets an account grant ITSELF admin with no gate at all.
+async function fillMyUserId() {
   try {
     const result = await adminApi("/api/whoami");
-    prompt(
-      "Your user_id (copy this, then grant it admin yourself via curl + the static token):",
-      result.user_id
-    );
+    document.getElementById("setAdminUserId").value = result.user_id;
   } catch (err) {
     alert(`Lookup failed: ${err.message}`);
+  }
+}
+
+async function setAdmin(isAdminValue) {
+  const userId = document.getElementById("setAdminUserId").value.trim();
+  if (!userId) return alert("Enter a user_id first (or click \"Use my account\").");
+  const verb = isAdminValue ? "Grant" : "Revoke";
+  if (!confirm(`${verb} admin rights for:\n${userId}?`)) return;
+  try {
+    await adminApi("/api/admin/set-admin", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, is_admin: isAdminValue }),
+    });
+    alert(`Done -- ${userId} admin status is now ${isAdminValue}.`);
+  } catch (err) {
+    alert(`${verb} admin failed: ${err.message}`);
   }
 }
 
@@ -275,7 +271,9 @@ document.getElementById("generateBtn").onclick = async () => {
   }
 };
 
-document.getElementById("grantAdminBtn").onclick = showMyUserId;
+document.getElementById("fillMyUserIdBtn").onclick = fillMyUserId;
+document.getElementById("grantAdminBtn").onclick = () => setAdmin(true);
+document.getElementById("revokeAdminBtn").onclick = () => setAdmin(false);
 
 const savedToken = localStorage.getItem("phoenix_admin_token");
 if (savedToken) document.getElementById("adminToken").value = savedToken;

@@ -69,7 +69,13 @@
   <div class="token-row">
     <input type="password" id="adminToken" placeholder="Admin token (only needed once, or as fallback)" />
     <button class="submit-btn" id="loadBtn">Load</button>
-    <button class="submit-btn" id="grantAdminBtn" title="Sign in above first, then copy your user_id to grant it admin via curl">Show my user_id</button>
+  </div>
+
+  <div class="token-row">
+    <input type="text" id="setAdminUserId" placeholder="user_id to grant/revoke admin" />
+    <button class="submit-btn" id="fillMyUserIdBtn" title="Sign in above first, fills in your own user_id">Use my account</button>
+    <button class="submit-btn" id="grantAdminBtn">Grant Admin</button>
+    <button class="reject-btn" id="revokeAdminBtn">Revoke Admin</button>
   </div>
 
   <div class="staging-tabs">

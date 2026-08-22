@@ -33,29 +33,13 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// Client-side gate: not a real security boundary (this is a static file,
-// its source is always fetchable), but stops an outsider who found the
-// URL from ever seeing real admin UI/data.
-(async function enforceAdminGate() {
-  if (getToken()) return;
-  try {
-    if (typeof waitForClerk === "function") await waitForClerk();
-  } catch { /* falls through to the redirect below */ }
-  if (typeof isSignedIn !== "function" || !isSignedIn()) {
-    window.location.href = "index.html";
-    return;
-  }
-  try {
-    const clerkToken = await getAuthToken();
-    const res = await fetch(`${ADMIN_API_BASE}/api/usage`, {
-      headers: { Authorization: `Bearer ${clerkToken}` },
-    });
-    const data = await res.json();
-    if (!data.is_admin) window.location.href = "index.html";
-  } catch {
-    window.location.href = "index.html";
-  }
-})();
+// No client-side redirect gate here -- one was tried and removed: it
+// preemptively bounced anyone without a token or admin session away
+// from the page, which broke the bootstrap flow itself. The real
+// security boundary is server-side: every actual action and every
+// piece of data still requires _require_admin() to pass (static token,
+// or a signed-in is_admin account) -- an outsider can load this page's
+// empty shell, but can't see or do anything real.
 
 function renderSummary(summary) {
   return `
