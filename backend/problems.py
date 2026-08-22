@@ -2401,6 +2401,38 @@ def list_all_live_problems():
     return [dict(r) for r in rows]
 
 
+def _normalize_code_structure(code: str) -> str:
+    """Strips literal values (string/numeric literals, comments,
+    whitespace differences) so two queries/solutions that are
+    structurally identical but reworded/reskinned normalize to the same
+    string -- catches duplicates the title-similarity check alone
+    misses (verified in practice: 'Customers Who Never Ordered' and
+    'Find Customers with No Orders' were the literal same LEFT JOIN
+    query under different titles, similarity too low to trip the title
+    check)."""
+    s = code.lower()
+    s = re.sub(r"#.*", "", s)
+    s = re.sub(r"'[^']*'", "X", s)
+    s = re.sub(r'"[^"]*"', "X", s)
+    s = re.sub(r"\b\d+\b", "N", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def list_existing_canonical_content(track: str) -> set[str]:
+    """Normalized canonical_sql/canonical_solution for every existing
+    problem on this track (live or pending) -- the structural-duplicate
+    counterpart to list_existing_titles()'s wording-based check."""
+    field = "canonical_sql" if track == "sql" else "canonical_solution"
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {field} FROM problems WHERE status IN ('live', 'pending_review') AND track = %s",
+                (track,),
+            )
+            return {_normalize_code_structure(row[0]) for row in cur.fetchall() if row[0]}
+
+
 def list_existing_titles() -> list[str]:
     """Titles of every problem that already exists -- live or still
     awaiting review. Fed into the batch-generation prompt so the model
@@ -2618,6 +2650,18 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
         ratio = difflib.SequenceMatcher(None, draft["title"].lower(), existing_title.lower()).ratio()
         if ratio >= DUPLICATE_TITLE_THRESHOLD:
             raise InvalidDraftProblem(f"Draft title '{draft['title']}' is too similar to existing problem '{existing_title}' ({ratio:.2f}).")
+
+    # Structural duplicate check, independent of title wording -- catches
+    # a reworded title over the literal same query/solution (found this
+    # exact defect twice in the live bank: same LEFT JOIN under two
+    # titles, same word-extraction function under two titles).
+    content_field = "canonical_sql" if track == "sql" else "canonical_solution"
+    draft_normalized = _normalize_code_structure(draft.get(content_field) or "")
+    if draft_normalized and draft_normalized in list_existing_canonical_content(track):
+        raise InvalidDraftProblem(
+            f"Draft's {content_field} is structurally identical to an existing problem "
+            "(same logic under a different title)."
+        )
 
     if track == "python":
         try:
