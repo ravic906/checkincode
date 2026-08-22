@@ -2382,6 +2382,34 @@ def set_problem_description(problem_id: str, description: str) -> None:
             cur.execute("UPDATE problems SET description = %s WHERE id = %s", (description.strip(), problem_id))
 
 
+def set_problem_difficulty(problem_id: str, difficulty: str) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET difficulty = %s WHERE id = %s", (difficulty, problem_id))
+
+
+def patch_problem_content(problem_id: str, **fields) -> None:
+    """
+    Generic content patch for fixing a genuine, verified bug in an
+    already-live problem (a hardcoded magic number masquerading as a
+    general solution, a description promising behavior the code never
+    implements, a SQL query that can't actually produce what the
+    description claims) -- as opposed to set_problem_topic/
+    set_problem_description above, which only ever touch one narrow
+    field each. Only the keys actually passed get updated; callers should
+    always re-verify objective correctness themselves after calling this
+    (this function has no opinion on whether the new content is right).
+    """
+    allowed = {"description", "canonical_solution", "test_code", "canonical_sql", "seed_sql", "schema_sql"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE problems SET {set_clause} WHERE id = %s", (*updates.values(), problem_id))
+
+
 def set_problem_examples(problem_id: str, examples: list[dict]) -> None:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

@@ -1089,6 +1089,89 @@ def api_admin_set_description(problem_id: str, req: SetDescriptionRequest, reque
     return {"id": problem_id, "description": req.description}
 
 
+class SetDifficultyRequest(BaseModel):
+    difficulty: str
+
+
+@app.post("/api/admin/problems/{problem_id}/set-difficulty")
+def api_admin_set_difficulty(problem_id: str, req: SetDifficultyRequest, request: Request):
+    """Manual override for a single problem's difficulty label -- same
+    shape as set-topic, for applying the content-quality audit's
+    difficulty-calibration suggestions (llm.audit_problem_quality) after
+    human review."""
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    if req.difficulty not in ("easy", "medium", "hard"):
+        raise HTTPException(400, "difficulty must be 'easy', 'medium', or 'hard'.")
+    problems_module.set_problem_difficulty(problem_id, req.difficulty)
+    return {"id": problem_id, "difficulty": req.difficulty}
+
+
+class PatchContentRequest(BaseModel):
+    description: str | None = None
+    canonical_solution: str | None = None
+    test_code: str | None = None
+    canonical_sql: str | None = None
+    seed_sql: str | None = None
+    schema_sql: str | None = None
+
+
+@app.post("/api/admin/problems/{problem_id}/patch-content")
+def api_admin_patch_content(problem_id: str, req: PatchContentRequest, request: Request):
+    """
+    Fixes a genuine, verified content bug found by the audit pipeline
+    (llm.audit_problem_quality) that goes beyond a plain description
+    rewrite -- e.g. a canonical_solution with a hardcoded magic number
+    standing in for a value that can't actually be derived from the
+    stated inputs, or a SQL query that structurally can't produce what
+    the description promises. Only the fields actually passed are
+    changed; everything else on the problem stays as-is.
+
+    Verifies the MERGED (not-yet-committed) content against the exact
+    same objective-correctness check the audit and real grading use
+    BEFORE writing anything -- a patch that doesn't pass its own test is
+    rejected outright rather than landing a live problem in a broken
+    state. Refreshes the SQL expected-output cache immediately for SQL
+    patches, since a stale cache would grade real submissions against
+    the OLD content.
+    """
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    track = p.get("track", "sql")
+    updates = {k: v for k, v in req.dict().items() if v is not None}
+    if not updates:
+        return {"id": problem_id, "updated_fields": [], "verified": True}
+    merged = {**p, **updates}
+
+    if track == "python":
+        try:
+            result = pysandbox.run_python_submission(student_code=merged["canonical_solution"], test_code=merged["test_code"])
+        except Exception as e:
+            raise HTTPException(400, f"Verification error: {e}")
+        if not result["passed"]:
+            raise HTTPException(400, f"Patched content fails its own test_code: {result.get('error')}")
+    else:
+        try:
+            cols, rows, _truncated = sandbox.compute_expected_output(merged)
+        except Exception as e:
+            raise HTTPException(400, f"Patched SQL doesn't execute cleanly: {e}")
+        if not cols:
+            raise HTTPException(400, "Patched SQL produced no columns.")
+
+    problems_module.patch_problem_content(problem_id, **updates)
+
+    if track == "sql" and any(k in updates for k in ("canonical_sql", "seed_sql", "schema_sql")):
+        refreshed = problems_module.get_problem(problem_id)
+        cols, rows, _truncated = sandbox.compute_expected_output(refreshed)
+        _EXPECTED_CACHE[problem_id] = (cols, rows)
+
+    return {"id": problem_id, "updated_fields": list(updates.keys()), "verified": True}
+
+
 @app.get("/api/admin/problems/{problem_id}")
 def api_admin_get_problem(problem_id: str, request: Request):
     """
