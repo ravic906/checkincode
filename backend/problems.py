@@ -2620,31 +2620,6 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
             raise InvalidDraftProblem(f"Draft title '{draft['title']}' is too similar to existing problem '{existing_title}' ({ratio:.2f}).")
 
     if track == "python":
-        # A test_code that only asserts isinstance(...)/None-or-type
-        # checks, or that just leaves a comment telling a human to
-        # "check manually", passes this execution check trivially no
-        # matter what canonical_solution does -- verified in practice:
-        # a batch of "Files and I/O" drafts all had exactly this shape
-        # and would have accepted a completely broken solution. Require
-        # a minimum number of real equality assertions (`==`, not just
-        # isinstance/type checks) before even bothering to execute it.
-        # Bare `==` covers most asserts; pandas/numpy tests legitimately
-        # compare via `.equals(...)` or `np.array_equal(...)` instead,
-        # since a DataFrame/array doesn't behave like a normal boolean
-        # under `==` -- both count as "real" here, isinstance/type-only
-        # checks are what don't.
-        # DOTALL: a realistic assert's argument (a multi-line list/dict
-        # literal, common for larger test inputs) puts the actual `==`
-        # on a different physical line than the word "assert" -- without
-        # DOTALL, `.` can't cross that newline and every multi-line
-        # assert is invisible to this count, which very nearly shipped a
-        # validation gate that rejected perfectly good multi-line tests.
-        real_equality_asserts = len(re.findall(r"assert\s+.+?(==|\.equals\(|array_equal\()", draft["test_code"], re.DOTALL))
-        if real_equality_asserts < 3:
-            raise InvalidDraftProblem(
-                f"test_code has only {real_equality_asserts} real equality assertion(s) -- "
-                "not enough to actually verify correctness (isinstance/type-only checks don't count)."
-            )
         try:
             result = pysandbox.run_python_submission(
                 student_code=draft["canonical_solution"],
@@ -2654,6 +2629,26 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
             raise InvalidDraftProblem(f"canonical_solution failed to execute in the sandbox: {e}")
         if not result["passed"]:
             raise InvalidDraftProblem(f"canonical_solution did not pass its own test_code: {result['error']}")
+
+        # A test_code that only asserts isinstance(...)/None-or-type
+        # checks, or that just leaves a comment telling a human to
+        # "check manually", passes the check above trivially no matter
+        # what canonical_solution does -- verified in practice: a batch
+        # of "Files and I/O" drafts all had exactly this shape and would
+        # have accepted a completely broken solution. Confirm the tests
+        # actually discriminate right answers from wrong ones by running
+        # them against a deliberately wrong stub and requiring it to
+        # fail -- see pysandbox.test_code_discriminates for why this
+        # replaced an earlier regex-based attempt to recognize "real"
+        # assertion styles (it kept missing legitimate idioms like a bare
+        # pd.testing.assert_frame_equal(...) call).
+        if not pysandbox.test_code_discriminates(
+            test_code=draft["test_code"], function_signature=draft["function_signature"],
+        ):
+            raise InvalidDraftProblem(
+                "test_code doesn't actually verify correctness -- a deliberately wrong "
+                "stub implementation passed it anyway."
+            )
     else:
         try:
             sandbox.validate_student_sql(draft["canonical_sql"])

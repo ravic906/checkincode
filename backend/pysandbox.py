@@ -31,6 +31,39 @@ _EXAMPLES_START = "___PHOENIX_EXAMPLES_START___"
 _EXAMPLES_END = "___PHOENIX_EXAMPLES_END___"
 
 
+def test_code_discriminates(*, test_code: str, function_signature: str) -> bool:
+    """
+    Verifies test_code actually checks something, by running it against
+    a deliberately WRONG stub (always returns None) instead of the real
+    canonical_solution. Returns True if the stub correctly fails the
+    tests (proving they discriminate right answers from wrong ones);
+    False if the stub passes anyway (proving the tests are vacuous --
+    e.g. `assert isinstance(result, dict)` or `assert x is None or
+    isinstance(x, float)` pass no matter what the function returns).
+
+    This replaced a regex-based attempt to recognize "real" assertion
+    styles (==, .equals(, array_equal(, 'x' in output, etc.) -- that
+    approach kept missing legitimate idioms (pd.testing.assert_frame_equal
+    called bare, without the `assert` keyword, was invisible to it) and
+    turned into an unwinnable game of enumerating every valid Python
+    comparison style. Checking discriminative power directly sidesteps
+    the whole question of *how* the test is written.
+
+    Returns True (benefit of the doubt) on any sandbox-level error --
+    this check exists to catch vacuous tests, not to be a second point
+    of failure for legitimate drafts when the sandbox itself hiccups.
+    """
+    if not E2B_API_KEY:
+        return True
+    stub_source = f"def {function_signature}(*args, **kwargs):\n    return None\n\n{test_code}\n"
+    try:
+        with Sandbox.create(api_key=E2B_API_KEY, timeout=RUN_TIMEOUT_SECONDS) as sandbox:
+            execution = sandbox.run_code(stub_source, timeout=RUN_TIMEOUT_SECONDS)
+    except Exception:
+        return True
+    return execution.error is not None
+
+
 def run_python_submission(*, student_code: str, test_code: str) -> dict:
     """
     Runs `student_code` followed by `test_code` (plain assert statements)
