@@ -946,6 +946,26 @@ def api_admin_set_topic(problem_id: str, req: SetTopicRequest, request: Request)
     return {"id": problem_id, "topic": req.topic}
 
 
+class SetDescriptionRequest(BaseModel):
+    description: str
+
+
+@app.post("/api/admin/problems/{problem_id}/set-description")
+def api_admin_set_description(problem_id: str, req: SetDescriptionRequest, request: Request):
+    """Manual override for a single problem's description -- for cases
+    where generation prompt instructions alone aren't reliable enough
+    (verified: e.g. requiring Files-and-I/O problems to show concrete
+    example file content kept getting ignored even after two regenerate
+    attempts) and a human reviewer needs to write correct prose by hand
+    rather than keep hoping the model complies."""
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    problems_module.set_problem_description(problem_id, req.description)
+    return {"id": problem_id, "description": req.description}
+
+
 @app.get("/api/admin/problems/{problem_id}")
 def api_admin_get_problem(problem_id: str, request: Request):
     """

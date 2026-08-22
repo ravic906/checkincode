@@ -2376,6 +2376,12 @@ def set_problem_topic(problem_id: str, topic: str) -> None:
             cur.execute("UPDATE problems SET topic = %s WHERE id = %s", (topic, problem_id))
 
 
+def set_problem_description(problem_id: str, description: str) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET description = %s WHERE id = %s", (description.strip(), problem_id))
+
+
 def set_problem_examples(problem_id: str, examples: list[dict]) -> None:
     with db.get_conn() as conn:
         with conn.cursor() as cur:
