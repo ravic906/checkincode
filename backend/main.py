@@ -1236,6 +1236,24 @@ def api_admin_set_difficulty(problem_id: str, req: SetDifficultyRequest, request
     return {"id": problem_id, "difficulty": req.difficulty}
 
 
+class SetFreeRequest(BaseModel):
+    is_free: bool
+
+
+@app.post("/api/admin/problems/{problem_id}/set-free")
+def api_admin_set_free(problem_id: str, req: SetFreeRequest, request: Request):
+    """Manual toggle for a single problem's free-tier availability --
+    same shape as set-topic/set-difficulty, for curating the free sample
+    one problem at a time (the SQL track's curated set is currently a
+    hardcoded id list in problems.py; Python/Case don't have one yet)."""
+    _require_admin(request)
+    p = problems_module.get_problem(problem_id)
+    if not p:
+        raise HTTPException(404, "Problem not found")
+    problems_module.set_problem_free(problem_id, req.is_free)
+    return {"id": problem_id, "is_free": req.is_free}
+
+
 class PatchContentRequest(BaseModel):
     description: str | None = None
     canonical_solution: str | None = None

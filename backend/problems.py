@@ -2390,6 +2390,12 @@ def set_problem_difficulty(problem_id: str, difficulty: str) -> None:
             cur.execute("UPDATE problems SET difficulty = %s WHERE id = %s", (difficulty, problem_id))
 
 
+def set_problem_free(problem_id: str, is_free: bool) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET is_free = %s WHERE id = %s", (is_free, problem_id))
+
+
 def patch_problem_content(problem_id: str, **fields) -> None:
     """
     Generic content patch for fixing a genuine, verified bug in an
