@@ -473,12 +473,20 @@ def reclassify_topics_batch(*, user_id: str, problems: list[dict], allowed_topic
     topic against the problem's current one and only write an update
     where they actually differ.
     """
-    content_field = "canonical_sql" if track == "sql" else "canonical_solution"
     blocks = []
     for p in problems:
+        if track == "sql":
+            code = p["canonical_sql"]
+        else:
+            # test_code carries the import (`import numpy as np`, etc.)
+            # in most drafts, not canonical_solution -- the solution
+            # function itself often just operates on whatever
+            # array/DataFrame test_code hands it, with no import of its
+            # own. Both are needed for an accurate call.
+            code = f'{p["canonical_solution"]}\n\n# Test code (shows real inputs/imports):\n{p["test_code"]}'
         blocks.append(
             f'ID: {p["id"]}\nCurrent label: {p["topic"]}\nTitle: {p["title"]}\n'
-            f'Code:\n{p[content_field]}'
+            f'Code:\n{code}'
         )
     user_prompt = "\n\n---\n\n".join(blocks)
     system_prompt = (

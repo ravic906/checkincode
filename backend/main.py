@@ -854,7 +854,13 @@ def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
             "p_value", "confidence_interval", "z_score", "t_test", "pvalue",
         )
         for p in batch:
-            code = p.get("canonical_solution") or ""
+            # The import usually lives in test_code, not
+            # canonical_solution -- the solution function itself often
+            # just operates on a DataFrame/array passed in as a
+            # parameter without needing to import the library at all
+            # (e.g. `arr[arr > threshold]` needs no import to work on
+            # whatever numpy array test_code hands it).
+            code = (p.get("canonical_solution") or "") + "\n" + (p.get("test_code") or "")
             if "import pandas" in code or re.search(r"\bpd\.", code):
                 pandas_batch.append(p)
             elif "import numpy" in code or re.search(r"\bnp\.", code):
