@@ -559,8 +559,8 @@ def audit_problem_quality(
     problem: dict,
     allowed_topics: list[str],
     correctness: dict,
-    ask_phoenix_normal: dict,
-    ask_phoenix_edge: dict,
+    ask_phoenix_normal: dict | None = None,
+    ask_phoenix_edge: dict | None = None,
 ) -> dict:
     """
     Full content-quality judge for one already-live problem -- unlike
@@ -569,16 +569,24 @@ def audit_problem_quality(
     interview/FAANG-grade, is the topic label right, does the description
     give students everything they need (the exact bug class found earlier
     -- "load a CSV" with no filename), is the stated difficulty realistic,
-    does the stored sample input/output look sane, and did Ask Phoenix
-    handle a normal question and an edge-case question well for this
-    specific problem.
+    does the stored sample input/output look sane, and (SQL/Python only)
+    did Ask Phoenix handle a normal question and an edge-case question
+    well for this specific problem.
 
     `correctness` is the caller's own objective pass/fail result (from
     pysandbox.run_python_submission / sandbox.compute_expected_output --
     never re-derived here, since that's a deterministic check an LLM
-    shouldn't be asked to guess at). `ask_phoenix_normal`/`ask_phoenix_edge`
-    are {"question": str, "answer": str} pairs already captured by calling
-    llm.ask_phoenix() twice before this function runs.
+    shouldn't be asked to guess at). Pass {"passed": None, "detail": "..."}
+    for track='case', which has no single verifiable answer to check.
+
+    `ask_phoenix_normal`/`ask_phoenix_edge` are {"question": str,
+    "answer": str} pairs already captured by calling llm.ask_phoenix()
+    twice before this function runs. Omit both (leave as None) for
+    track='case' -- Ask Phoenix is deliberately not offered on that track
+    (the whole point of a case round is figuring it out yourself), so
+    there's nothing to judge there; the prompt and response schema below
+    are built dynamically to drop those two dimensions entirely rather
+    than asking the judge to grade something that was never run.
 
     Returns {"verdict": {...}, "usage": {...}}. On a malformed reply,
     returns a "needs_fix" verdict with the raw reply in `notes` rather than
@@ -586,12 +594,22 @@ def audit_problem_quality(
     row in the audit, not silently drop the problem from the report or
     crash the whole batch.
     """
+    has_ask_phoenix = ask_phoenix_normal is not None and ask_phoenix_edge is not None
+
     if problem.get("track") == "python":
         content_block = (
             f"Starter code:\n{problem.get('starter_code') or ''}\n\n"
             f"Function signature: {problem.get('function_signature')}\n\n"
             f"Canonical solution:\n{problem.get('canonical_solution')}\n\n"
             f"Test code:\n{problem.get('test_code')}"
+        )
+    elif problem.get("track") == "case":
+        content_block = (
+            f"Case prompt:\n{problem.get('case_prompt')}\n\n"
+            f"Supporting context:\n{problem.get('case_context') or '(none)'}\n\n"
+            f"Rubric points (internal, never shown to students):\n"
+            + "\n".join(f"- {pt}" for pt in (problem.get('rubric_points') or [])) + "\n\n"
+            f"Sample strong answer (internal, never shown to students):\n{problem.get('sample_strong_answer')}"
         )
     else:
         content_block = (
@@ -600,11 +618,28 @@ def audit_problem_quality(
             f"Canonical SQL:\n{problem.get('canonical_sql')}"
         )
 
-    correctness_block = (
-        f"Objective correctness check (already run, not your judgment to make): "
-        f"{'PASSED' if correctness.get('passed') else 'FAILED'}"
-        f"{' -- ' + correctness['detail'] if correctness.get('detail') else ''}"
-    )
+    if correctness.get("passed") is None:
+        correctness_block = (
+            "Objective correctness check: N/A -- this track has no single "
+            "verifiable answer to execute."
+        )
+    else:
+        correctness_block = (
+            f"Objective correctness check (already run, not your judgment to make): "
+            f"{'PASSED' if correctness.get('passed') else 'FAILED'}"
+            f"{' -- ' + correctness['detail'] if correctness.get('detail') else ''}"
+        )
+
+    ask_phoenix_block = ""
+    if has_ask_phoenix:
+        ask_phoenix_block = (
+            f"\n\n--- Ask Phoenix transcript 1 (normal question) ---\n"
+            f"Student asked: {ask_phoenix_normal['question']}\n"
+            f"Phoenix answered: {ask_phoenix_normal['answer']}\n\n"
+            f"--- Ask Phoenix transcript 2 (edge-case question) ---\n"
+            f"Student asked: {ask_phoenix_edge['question']}\n"
+            f"Phoenix answered: {ask_phoenix_edge['answer']}"
+        )
 
     user_prompt = (
         f"ID: {problem['id']}\n"
@@ -615,13 +650,8 @@ def audit_problem_quality(
         f"Description shown to students:\n{problem['description']}\n\n"
         f"{content_block}\n\n"
         f"Sample input/output currently shown to students:\n{json.dumps(problem.get('examples'))}\n\n"
-        f"{correctness_block}\n\n"
-        f"--- Ask Phoenix transcript 1 (normal question) ---\n"
-        f"Student asked: {ask_phoenix_normal['question']}\n"
-        f"Phoenix answered: {ask_phoenix_normal['answer']}\n\n"
-        f"--- Ask Phoenix transcript 2 (edge-case question) ---\n"
-        f"Student asked: {ask_phoenix_edge['question']}\n"
-        f"Phoenix answered: {ask_phoenix_edge['answer']}"
+        f"{correctness_block}"
+        f"{ask_phoenix_block}"
     )
 
     system_prompt = (
@@ -680,18 +710,21 @@ def audit_problem_quality(
         "float typing, numpy/defaultdict/date-as-string reprs, or "
         "\"should be a list/dict not a string\" is NEVER valid grounds to "
         "fail this field -- if that's your only objection, set ok: true.\n\n"
-        "6. ask_phoenix_normal_ok / ask_phoenix_edge_ok: judge each Ask "
-        "Phoenix transcript independently. Phoenix has two legitimate "
-        "modes: GUIDE (describe concepts in words, never hand over the "
-        "finished answer) for questions that don't explicitly ask for the "
-        "full solution, and COMPLY FULLY (write the real, complete answer) "
-        "the moment a question unambiguously asks for it (\"just give me "
-        "the code/query\", \"show me the full answer\"). Either mode is "
-        "correct behavior for the RIGHT kind of question -- only fail a "
-        "transcript if Phoenix picked the wrong mode for what was actually "
-        "asked, gave a wrong/misleading technical answer, or the answer "
-        "doesn't actually address this specific problem.\n\n"
-        "Weigh all of the above into overall_verdict: \"pass\" only if "
+        + (
+            "6. ask_phoenix_normal_ok / ask_phoenix_edge_ok: judge each Ask "
+            "Phoenix transcript independently. Phoenix has two legitimate "
+            "modes: GUIDE (describe concepts in words, never hand over the "
+            "finished answer) for questions that don't explicitly ask for the "
+            "full solution, and COMPLY FULLY (write the real, complete answer) "
+            "the moment a question unambiguously asks for it (\"just give me "
+            "the code/query\", \"show me the full answer\"). Either mode is "
+            "correct behavior for the RIGHT kind of question -- only fail a "
+            "transcript if Phoenix picked the wrong mode for what was actually "
+            "asked, gave a wrong/misleading technical answer, or the answer "
+            "doesn't actually address this specific problem.\n\n"
+            if has_ask_phoenix else ""
+        )
+        + "Weigh all of the above into overall_verdict: \"pass\" only if "
         "there is no real issue worth a human's attention; \"needs_fix\" "
         "if anything above would genuinely need a human to look at it "
         "before shipping this to real candidates.\n\n"
@@ -701,9 +734,9 @@ def audit_problem_quality(
         '"description_sufficient": {"ok": bool, "reason": "..."}, '
         '"difficulty_correct": {"ok": bool, "suggested_difficulty": "easy|medium|hard"}, '
         '"sample_io_sane": {"ok": bool, "reason": "..."}, '
-        '"ask_phoenix_normal_ok": {"ok": bool, "reason": "..."}, '
-        '"ask_phoenix_edge_ok": {"ok": bool, "reason": "..."}, '
-        '"overall_verdict": "pass|needs_fix", '
+        + ('"ask_phoenix_normal_ok": {"ok": bool, "reason": "..."}, '
+           '"ask_phoenix_edge_ok": {"ok": bool, "reason": "..."}, ' if has_ask_phoenix else '')
+        + '"overall_verdict": "pass|needs_fix", '
         '"notes": "..."}'
     )
 

@@ -1068,18 +1068,109 @@ def _audit_ask_phoenix_questions(track: str) -> tuple[str, str]:
     )
 
 
+def _run_audit_for_problem(p: dict) -> dict:
+    """
+    Full content-quality audit pipeline for one problem, any track --
+    objective correctness where one exists (reusing the exact same
+    execution paths production grading uses), two real Ask Phoenix
+    exchanges for SQL/Python (skipped for Case, which doesn't offer Ask
+    Phoenix at all), and one LLM judge call covering FAANG-grade quality /
+    topic alignment / description sufficiency / difficulty calibration /
+    sample-I/O sanity / (SQL+Python only) Ask Phoenix quality -- see
+    llm.audit_problem_quality. Shared by audit-batch (explicit re-audit of
+    already-live problems) and the approve endpoint (automatic audit the
+    moment a problem goes live) so both paths stay in lockstep rather
+    than drifting into two slightly-different audit implementations.
+
+    Raises on failure -- callers decide how to handle that (audit-batch
+    surfaces it as a per-id error entry; approve treats it as non-fatal
+    since the problem's correctness was already validated at draft-insert
+    time and an audit hiccup shouldn't block a real approval).
+    """
+    track = p.get("track", "sql")
+    usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
+
+    if track == "case":
+        allowed_topics = case_topics.CASE_TOPICS
+        correctness = {"passed": None, "detail": "N/A -- no single verifiable answer for this track"}
+        judge_result = llm.audit_problem_quality(
+            user_id="admin", problem=p, allowed_topics=allowed_topics, correctness=correctness,
+        )
+        for k in usage_totals:
+            usage_totals[k] += judge_result["usage"].get(k, 0)
+        return {
+            "id": p["id"], "title": p["title"], "track": track,
+            "difficulty": p["difficulty"], "topic": p["topic"],
+            "correctness": correctness, "ask_phoenix": None,
+            "verdict": judge_result["verdict"], "usage": usage_totals,
+        }
+
+    if track == "python":
+        allowed_topics = py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+        try:
+            run_result = pysandbox.run_python_submission(student_code=p["canonical_solution"], test_code=p["test_code"])
+            discriminates = pysandbox.test_code_discriminates(test_code=p["test_code"], function_signature=p["function_signature"])
+            correctness = {
+                "passed": bool(run_result["passed"] and discriminates),
+                "detail": run_result.get("error") or (None if discriminates else "test_code does not discriminate a wrong answer (vacuous test)"),
+            }
+        except Exception as e:
+            correctness = {"passed": False, "detail": f"Execution error: {e}"}
+    else:
+        allowed_topics = topics.GRADEABLE_TOPICS
+        try:
+            cols, rows, _truncated = sandbox.compute_expected_output(p)
+            correctness = {
+                "passed": bool(cols) and len(rows) > 0,
+                "detail": None if (cols and len(rows) > 0) else "canonical_sql produced no rows or no columns",
+            }
+        except Exception as e:
+            correctness = {"passed": False, "detail": f"DuckDB error: {e}"}
+
+    normal_q, edge_q = _audit_ask_phoenix_questions(track)
+    normal_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=normal_q)
+    edge_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=edge_q)
+    for k in usage_totals:
+        usage_totals[k] += normal_result["usage"].get(k, 0) + edge_result["usage"].get(k, 0)
+
+    judge_result = llm.audit_problem_quality(
+        user_id="admin",
+        problem=p,
+        allowed_topics=allowed_topics,
+        correctness=correctness,
+        ask_phoenix_normal={"question": normal_q, "answer": normal_result["answer"]},
+        ask_phoenix_edge={"question": edge_q, "answer": edge_result["answer"]},
+    )
+    for k in usage_totals:
+        usage_totals[k] += judge_result["usage"].get(k, 0)
+
+    return {
+        "id": p["id"],
+        "title": p["title"],
+        "track": track,
+        "difficulty": p["difficulty"],
+        "topic": p["topic"],
+        "correctness": correctness,
+        "ask_phoenix": {
+            "normal": {"question": normal_q, "answer": normal_result["answer"]},
+            "edge": {"question": edge_q, "answer": edge_result["answer"]},
+        },
+        "verdict": judge_result["verdict"],
+        "usage": usage_totals,
+    }
+
+
 @app.post("/api/admin/problems/audit-batch")
 def api_admin_audit_batch(req: AuditBatchRequest, request: Request):
     """
     Full content-quality audit for an explicit batch of already-live
-    problems: objective correctness (reusing the exact same execution
-    paths production grading uses), two real Ask Phoenix exchanges
-    (normal + edge-case question), and one LLM judge call covering
-    FAANG-grade quality / topic alignment / description sufficiency /
-    difficulty calibration / sample-I/O sanity / Ask Phoenix quality (see
-    llm.audit_problem_quality). Purely diagnostic -- never writes
-    anything back to a problem; the caller reviews the report and decides
-    fixes separately.
+    problems (see _run_audit_for_problem). Purely diagnostic on its own --
+    never writes anything back to a problem; the caller reviews the
+    report and decides fixes separately. Also runs automatically, one
+    problem at a time, whenever a draft is approved (see the approve
+    endpoint below) -- this endpoint remains for re-auditing already-live
+    problems in bulk (e.g. after a prompt/taxonomy change) or re-checking
+    specific ids.
 
     Explicit id list (not "audit everything"), same resumable-batch
     pattern as reclassify-topics -- a 279-problem sweep needs to be driven
@@ -1092,65 +1183,10 @@ def api_admin_audit_batch(req: AuditBatchRequest, request: Request):
         if not p:
             results.append({"id": pid, "error": "not found"})
             continue
-        track = p.get("track", "sql")
         try:
-            if track == "python":
-                allowed_topics = py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
-                try:
-                    run_result = pysandbox.run_python_submission(student_code=p["canonical_solution"], test_code=p["test_code"])
-                    discriminates = pysandbox.test_code_discriminates(test_code=p["test_code"], function_signature=p["function_signature"])
-                    correctness = {
-                        "passed": bool(run_result["passed"] and discriminates),
-                        "detail": run_result.get("error") or (None if discriminates else "test_code does not discriminate a wrong answer (vacuous test)"),
-                    }
-                except Exception as e:
-                    correctness = {"passed": False, "detail": f"Execution error: {e}"}
-            else:
-                allowed_topics = topics.GRADEABLE_TOPICS
-                try:
-                    cols, rows, _truncated = sandbox.compute_expected_output(p)
-                    correctness = {
-                        "passed": bool(cols) and len(rows) > 0,
-                        "detail": None if (cols and len(rows) > 0) else "canonical_sql produced no rows or no columns",
-                    }
-                except Exception as e:
-                    correctness = {"passed": False, "detail": f"DuckDB error: {e}"}
-
-            normal_q, edge_q = _audit_ask_phoenix_questions(track)
-            usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
-
-            normal_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=normal_q)
-            edge_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=edge_q)
-            for k in usage_totals:
-                usage_totals[k] += normal_result["usage"].get(k, 0) + edge_result["usage"].get(k, 0)
-
-            judge_result = llm.audit_problem_quality(
-                user_id="admin",
-                problem=p,
-                allowed_topics=allowed_topics,
-                correctness=correctness,
-                ask_phoenix_normal={"question": normal_q, "answer": normal_result["answer"]},
-                ask_phoenix_edge={"question": edge_q, "answer": edge_result["answer"]},
-            )
-            for k in usage_totals:
-                usage_totals[k] += judge_result["usage"].get(k, 0)
-
-            results.append({
-                "id": pid,
-                "title": p["title"],
-                "track": track,
-                "difficulty": p["difficulty"],
-                "topic": p["topic"],
-                "correctness": correctness,
-                "ask_phoenix": {
-                    "normal": {"question": normal_q, "answer": normal_result["answer"]},
-                    "edge": {"question": edge_q, "answer": edge_result["answer"]},
-                },
-                "verdict": judge_result["verdict"],
-                "usage": usage_totals,
-            })
+            results.append(_run_audit_for_problem(p))
         except Exception as e:
-            results.append({"id": pid, "title": p.get("title"), "track": track, "error": str(e)})
+            results.append({"id": pid, "title": p.get("title"), "track": p.get("track"), "error": str(e)})
     return {"checked": len(results), "results": results}
 
 
@@ -1397,7 +1433,21 @@ def api_admin_approve(problem_id: str, request: Request):
     if approved.get("track", "sql") == "sql":
         cols, rows, _ = sandbox.compute_expected_output(approved)
         _EXPECTED_CACHE[problem_id] = (cols, rows)
-    return {"id": problem_id, "status": "live"}
+
+    # Content-quality audit is now standard for every addition to the
+    # bank -- run it the moment a problem goes live, rather than as an
+    # occasional separate manual sweep, so quality issues surface
+    # immediately instead of being found weeks later in a bulk re-audit.
+    # Non-fatal: an audit hiccup (e.g. a transient LLM error) never
+    # blocks the approval itself -- the problem's objective correctness
+    # was already validated at draft-insert time (see
+    # problems.insert_pending_draft); this is an additional quality
+    # signal on top of that, not the gate a draft has to clear to ship.
+    try:
+        audit = _run_audit_for_problem(approved)
+    except Exception as e:
+        audit = {"error": str(e)}
+    return {"id": problem_id, "status": "live", "audit": audit}
 
 
 @app.post("/api/admin/problems/{problem_id}/reject")
