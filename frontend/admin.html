@@ -3,106 +3,70 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Phoenix Prep — Admin: Problem Review</title>
+<title>Phoenix Prep — Admin: Problems</title>
 <link rel="stylesheet" href="style.css" />
-<style>
-  body { padding: 24px; max-width: 900px; margin: 0 auto; }
-  .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-  .token-row { display: flex; gap: 8px; margin-bottom: 24px; }
-  .token-row input { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
-  .draft-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
-  .draft-card h3 { margin: 0 0 6px 0; font-size: 15px; }
-  .draft-meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-  .draft-actions { display: flex; gap: 8px; margin-top: 10px; }
-  .draft-actions button { border: none; border-radius: 6px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .approve-btn { background: var(--green); color: #0f1115; }
-  .reject-btn { background: var(--red); color: white; }
-  .cadence-note { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
-  .admin-nav { display: flex; gap: 8px; margin-bottom: 20px; }
-  .admin-nav a {
-    color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px;
-    border-radius: 6px; border: 1px solid var(--border);
-  }
-  .admin-nav a.active { color: var(--text); background: var(--panel-2); border-color: var(--accent); }
-  .staging-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
-  .staging-tabs button {
-    background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
-    padding: 6px 14px; font-size: 13px; cursor: pointer;
-  }
-  .staging-tabs button.active { color: var(--text); background: var(--panel-2); border-color: var(--accent); }
-  .filter-row { display: flex; gap: 8px; margin-bottom: 16px; }
-  .filter-row input, .filter-row select {
-    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 8px; padding: 8px 12px; font-size: 13px;
-  }
-  .filter-row input { flex: 1; }
-  .live-card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 16px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
-  }
-  .live-card .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .unpublish-btn { background: var(--red); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .category-pills { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-  .category-pill {
-    background: var(--panel); border: 1px solid var(--border); color: var(--text);
-    border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer;
-  }
-  .category-pill.active { border-color: var(--accent); background: var(--panel-2); }
-  .category-pill-count { color: var(--muted); margin-left: 4px; }
-  .category-pill.clear-pill { color: var(--muted); border-style: dashed; }
-</style>
+<link rel="stylesheet" href="admin.css" />
 </head>
 <body>
-  <div class="admin-header">
-    <h1>Problem Staging</h1>
-    <div style="display:flex; align-items:center; gap:12px;">
-      <div id="authSection"></div>
-      <button class="run-btn" id="generateBtn">Generate New Batch</button>
-    </div>
-  </div>
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="admin-sidebar-brand"><span class="accent">Phoenix</span>Prep <span class="admin-tag">Admin</span></div>
+      <nav class="admin-sidebar-nav">
+        <a href="admin-dashboard.html" data-page="dashboard"><span class="icon">◆</span> Dashboard</a>
+        <a href="admin.html" data-page="problems"><span class="icon">▤</span> Problems</a>
+        <a href="admin-users.html" data-page="users"><span class="icon">◑</span> Users</a>
+        <a href="admin-admins.html" data-page="admins"><span class="icon">◈</span> Admins</a>
+      </nav>
+      <div class="admin-sidebar-footer">
+        <div id="authSection"></div>
+        <button class="fallback-toggle" id="tokenFallbackToggle">Use token instead</button>
+        <div class="admin-token-fallback" id="adminTokenFallbackPanel">
+          <input type="password" id="adminTokenFallback" placeholder="Admin token" />
+        </div>
+      </div>
+    </aside>
 
-  <div class="admin-nav">
-    <a href="admin.html" class="active">Problem Review</a>
-    <a href="admin-users.html">Users</a>
-  </div>
+    <main class="admin-main">
+      <div class="admin-page-header">
+        <div>
+          <h1>Problems</h1>
+          <p class="subtitle">Review pending drafts and manage what's live.</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="generateBtn">Generate New Batch</button>
+        </div>
+      </div>
 
-  <div class="token-row">
-    <input type="password" id="adminToken" placeholder="Admin token (only needed once, or as fallback)" />
-    <button class="submit-btn" id="loadBtn">Load</button>
-  </div>
+      <div id="errorArea"></div>
 
-  <div class="token-row">
-    <input type="text" id="setAdminUserId" placeholder="user_id to grant/revoke admin" />
-    <button class="submit-btn" id="fillMyUserIdBtn" title="Sign in above first, fills in your own user_id">Use my account</button>
-    <button class="submit-btn" id="grantAdminBtn">Grant Admin</button>
-    <button class="reject-btn" id="revokeAdminBtn">Revoke Admin</button>
-  </div>
+      <div class="tabs">
+        <button id="tabPending" class="active">Pending Drafts</button>
+        <button id="tabLive">Live Problems</button>
+      </div>
 
-  <div class="staging-tabs">
-    <button id="tabPending" class="active">Pending Drafts</button>
-    <button id="tabLive">Live Problems</button>
-  </div>
+      <div id="pendingSection">
+        <p class="subtitle" id="cadenceNote" style="margin-bottom:16px;"></p>
+        <div id="pendingList"></div>
+      </div>
 
-  <div id="pendingSection">
-    <div class="cadence-note" id="cadenceNote"></div>
-    <div id="pendingList"></div>
-  </div>
-
-  <div id="liveSection" style="display:none;">
-    <div class="category-pills" id="liveCategoryCounts"></div>
-    <div class="filter-row">
-      <input type="text" id="liveSearch" placeholder="Search title or topic…" />
-      <select id="liveTrackFilter">
-        <option value="">All tracks</option>
-        <option value="sql">SQL</option>
-        <option value="python">Python</option>
-      </select>
-    </div>
-    <div id="liveList"></div>
+      <div id="liveSection" style="display:none;">
+        <div class="category-pills" id="liveCategoryCounts"></div>
+        <div class="filter-row">
+          <input type="text" id="liveSearch" placeholder="Search title or topic…" />
+          <select id="liveTrackFilter">
+            <option value="">All tracks</option>
+            <option value="sql">SQL</option>
+            <option value="python">Python</option>
+          </select>
+        </div>
+        <div id="liveList"></div>
+      </div>
+    </main>
   </div>
 
   <script src="config.js"></script>
   <script src="auth.js"></script>
+  <script src="admin-shared.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>

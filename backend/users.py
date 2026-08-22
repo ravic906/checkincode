@@ -95,6 +95,13 @@ def increment_interview_count(user_id: str):
             cur.execute("UPDATE users SET interviews_this_month = interviews_this_month + 1 WHERE id = %s", (user_id,))
 
 
+def list_admins() -> list[dict]:
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute("SELECT id, email, created_at FROM users WHERE is_admin = TRUE ORDER BY created_at")
+            return [dict(r) for r in cur.fetchall()]
+
+
 def is_admin(user_id: str) -> bool:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

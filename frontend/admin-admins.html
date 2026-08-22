@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Phoenix Prep — Admin: Users</title>
+<title>Phoenix Prep — Admin: Admins</title>
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="admin.css" />
 </head>
@@ -29,38 +29,36 @@
     <main class="admin-main">
       <div class="admin-page-header">
         <div>
-          <h1>Users</h1>
-          <p class="subtitle">Account tiers, usage, and per-user progress.</p>
+          <h1>Admins</h1>
+          <p class="subtitle">Only an existing admin (or the bootstrap token) can grant or revoke admin rights.</p>
         </div>
       </div>
 
       <div id="errorArea"></div>
-      <div class="stat-grid" id="summaryCards"></div>
 
       <div class="card">
-        <div class="section-title">Solved problems, platform-wide</div>
-        <div id="categoryChart"></div>
-      </div>
-
-      <div id="historyPanel"></div>
-
-      <div class="card">
-        <div class="section-title">All Users</div>
+        <div class="section-title">Current Admins</div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
                 <th>Email / ID</th>
-                <th>Tier</th>
-                <th>Submissions Today</th>
-                <th>Total Submissions</th>
-                <th>Solved</th>
-                <th>Interviews This Month</th>
-                <th>Joined</th>
+                <th>Admin Since</th>
               </tr>
             </thead>
-            <tbody id="usersBody"></tbody>
+            <tbody id="adminsBody"></tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Grant / Revoke Admin</div>
+        <p class="subtitle" style="margin:0;">Enter the target account's user_id. This never lets an account claim admin for itself with no gate -- the action still requires the admin token or an already-admin session to take effect.</p>
+        <div class="admin-form-row">
+          <input type="text" id="setAdminUserId" placeholder="user_id to grant/revoke admin" />
+          <button class="btn btn-sm" id="fillMyUserIdBtn" title="Sign in above first, fills in your own user_id">Use my account</button>
+          <button class="btn btn-success btn-sm" id="grantAdminBtn">Grant Admin</button>
+          <button class="btn btn-danger btn-sm" id="revokeAdminBtn">Revoke Admin</button>
         </div>
       </div>
     </main>
@@ -69,6 +67,6 @@
   <script src="config.js"></script>
   <script src="auth.js"></script>
   <script src="admin-shared.js"></script>
-  <script src="admin-users.js"></script>
+  <script src="admin-admins.js"></script>
 </body>
 </html>

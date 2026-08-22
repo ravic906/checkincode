@@ -1,79 +1,11 @@
 /*
- * Not linked from the main nav -- reached directly at /admin.html.
- * Two ways in, both accepted by the backend's _require_admin(): the
- * original shared X-Admin-Token secret (kept as a bootstrap/fallback
- * path), or a signed-in Clerk account with is_admin=True. Sign in via
- * the button auth.js renders, then use "Grant myself admin" once (needs
- * the token) -- after that, being signed in is enough on its own.
+ * Not linked from the main nav for non-admins -- reached at /admin.html.
+ * Two ways in, both accepted by the backend's _require_admin(): a
+ * signed-in Clerk account with is_admin=True, or the shared X-Admin-Token
+ * secret kept as a bootstrap/fallback path (see admin-shared.js).
  */
 
-const ADMIN_API_BASE = window.API_BASE || "http://127.0.0.1:8000";
-
-function getToken() {
-  return document.getElementById("adminToken").value.trim() || localStorage.getItem("phoenix_admin_token") || "";
-}
-
-async function adminApi(path, options = {}) {
-  const token = getToken();
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
-  if (token) headers["X-Admin-Token"] = token;
-  if (typeof getAuthToken === "function") {
-    const clerkToken = await getAuthToken();
-    if (clerkToken) headers["Authorization"] = `Bearer ${clerkToken}`;
-  }
-  const res = await fetch(`${ADMIN_API_BASE}${path}`, { ...options, headers });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed (${res.status})`);
-  }
-  return res.json();
-}
-
-// No client-side redirect gate here -- one was tried and removed: it
-// preemptively bounced anyone without a token or admin session away
-// from the page, which broke the bootstrap flow itself (you can't reach
-// the "grant admin" controls if the page kicks you out before you can
-// use them). The real security boundary is server-side: every actual
-// action and every piece of data still requires _require_admin() to
-// pass (static token, or a signed-in is_admin account) -- an outsider
-// can load this page's empty shell, but can't see or do anything real.
-
-// Fills the user_id field with whoever is currently signed in, as a
-// convenience -- the actual grant/revoke still goes through
-// POST /api/admin/set-admin below, which requires the admin token (or an
-// already-admin session) to actually take effect. There is deliberately
-// no call that lets an account grant ITSELF admin with no gate at all.
-async function fillMyUserId() {
-  try {
-    const result = await adminApi("/api/whoami");
-    document.getElementById("setAdminUserId").value = result.user_id;
-  } catch (err) {
-    alert(`Lookup failed: ${err.message}`);
-  }
-}
-
-async function setAdmin(isAdminValue) {
-  const userId = document.getElementById("setAdminUserId").value.trim();
-  if (!userId) return alert("Enter a user_id first (or click \"Use my account\").");
-  const verb = isAdminValue ? "Grant" : "Revoke";
-  if (!confirm(`${verb} admin rights for:\n${userId}?`)) return;
-  try {
-    await adminApi("/api/admin/set-admin", {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId, is_admin: isAdminValue }),
-    });
-    alert(`Done -- ${userId} admin status is now ${isAdminValue}.`);
-  } catch (err) {
-    alert(`${verb} admin failed: ${err.message}`);
-  }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
+initAdminSidebar("problems");
 
 function renderDraft(p) {
   return `
@@ -81,19 +13,18 @@ function renderDraft(p) {
       <h3>${escapeHtml(p.title)}</h3>
       <div class="draft-meta">${escapeHtml(p.difficulty)} · ${escapeHtml(p.topic)} · ${escapeHtml((p.tags || []).join(", "))}</div>
       <div>${escapeHtml(p.description)}</div>
-      <div class="schema-block" style="margin-top:10px;">${escapeHtml(p.schema_sql.trim())}</div>
+      <div class="schema-block">${escapeHtml(p.schema_sql.trim())}</div>
       <div class="schema-block">${escapeHtml(p.seed_sql.trim())}</div>
       <div class="schema-block">${escapeHtml(p.canonical_sql.trim())}</div>
       <div class="draft-actions">
-        <button class="approve-btn" onclick="approveDraft('${p.id}')">Approve</button>
-        <button class="reject-btn" onclick="rejectDraft('${p.id}')">Reject</button>
+        <button class="btn btn-success btn-sm" onclick="approveDraft('${p.id}')">Approve</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectDraft('${p.id}')">Reject</button>
       </div>
     </div>
   `;
 }
 
 async function loadPending() {
-  localStorage.setItem("phoenix_admin_token", getToken());
   const listEl = document.getElementById("pendingList");
   listEl.innerHTML = `<div class="loading-dots">Loading…</div>`;
   try {
@@ -106,9 +37,9 @@ async function loadPending() {
       : "No batch generated yet.";
     listEl.innerHTML = pending.problems.length
       ? pending.problems.map(renderDraft).join("")
-      : `<p style="color:var(--muted);">No pending drafts.</p>`;
+      : `<p class="empty-note">No pending drafts.</p>`;
   } catch (err) {
-    listEl.innerHTML = `<div class="result-banner fail">${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -131,37 +62,15 @@ async function rejectDraft(id) {
 }
 
 let allLiveProblems = [];
-let activeLiveCategory = null; // null | "sql" | "python" | "pandas" | "numpy" -- set by clicking a count pill, drills the list without needing the track dropdown too
-
-// Same bucketing rule as problems.py's _category_bucket() / admin-users.js's
-// categoryBucket() -- pandas/numpy are topic buckets within track='python',
-// not their own track.
-const LIVE_PANDAS_TOPICS = new Set([
-  "Pandas Data Cleaning & Missing Data",
-  "Pandas Merging, Joining & Reshaping",
-  "Pandas GroupBy & Aggregation",
-  "Pandas Time Series Operations",
-]);
-const LIVE_NUMPY_TOPICS = new Set([
-  "NumPy Array Creation & Indexing",
-  "NumPy Broadcasting & Vectorization",
-  "NumPy Aggregations & Boolean Masking",
-]);
-function liveCategoryBucket(p) {
-  if (p.track !== "python") return "sql";
-  if (LIVE_PANDAS_TOPICS.has(p.topic)) return "pandas";
-  if (LIVE_NUMPY_TOPICS.has(p.topic)) return "numpy";
-  return "python";
-}
+let activeLiveCategory = null; // null | "sql" | "python" | "pandas" | "numpy" -- set by clicking a count pill
 
 function renderLiveCategoryCounts() {
   const counts = { sql: 0, python: 0, pandas: 0, numpy: 0 };
-  for (const p of allLiveProblems) counts[liveCategoryBucket(p)]++;
-  const labels = { sql: "SQL", python: "Python", pandas: "Pandas", numpy: "NumPy" };
+  for (const p of allLiveProblems) counts[categoryBucket(p.track, p.topic)]++;
   const el = document.getElementById("liveCategoryCounts");
-  el.innerHTML = Object.entries(labels).map(([key, label]) => `
+  el.innerHTML = Object.entries(CATEGORY_META).map(([key, meta]) => `
     <button class="category-pill${activeLiveCategory === key ? " active" : ""}" data-category="${key}">
-      ${label} <span class="category-pill-count">${counts[key]}</span>
+      ${meta.label} <span class="count">${counts[key]}</span>
     </button>
   `).join("") + (activeLiveCategory ? `<button class="category-pill clear-pill" id="clearLiveCategoryBtn">Clear ✕</button>` : "");
   el.querySelectorAll(".category-pill[data-category]").forEach(btn => {
@@ -181,12 +90,12 @@ function renderLiveCategoryCounts() {
 
 function renderLiveCard(p) {
   return `
-    <div class="live-card" id="live-${p.id}">
+    <div class="live-row" id="live-${p.id}">
       <div>
-        <div>${escapeHtml(p.title)}</div>
+        <div class="title">${escapeHtml(p.title)}</div>
         <div class="meta">${escapeHtml(p.track)} · ${escapeHtml(p.difficulty)} · ${escapeHtml(p.topic)} · ${escapeHtml((p.tags || []).join(", "))}</div>
       </div>
-      <button class="unpublish-btn" onclick="unpublishProblem('${p.id}')">Unpublish</button>
+      <button class="btn btn-danger btn-sm" onclick="unpublishProblem('${p.id}')">Unpublish</button>
     </div>
   `;
 }
@@ -195,7 +104,7 @@ function applyLiveFilters() {
   const q = document.getElementById("liveSearch").value.trim().toLowerCase();
   const track = document.getElementById("liveTrackFilter").value;
   const filtered = allLiveProblems.filter(p => {
-    if (activeLiveCategory && liveCategoryBucket(p) !== activeLiveCategory) return false;
+    if (activeLiveCategory && categoryBucket(p.track, p.topic) !== activeLiveCategory) return false;
     if (track && p.track !== track) return false;
     if (q && !(p.title.toLowerCase().includes(q) || p.topic.toLowerCase().includes(q))) return false;
     return true;
@@ -203,11 +112,10 @@ function applyLiveFilters() {
   const listEl = document.getElementById("liveList");
   listEl.innerHTML = filtered.length
     ? filtered.map(renderLiveCard).join("")
-    : `<p style="color:var(--muted);">No matching live problems.</p>`;
+    : `<p class="empty-note">No matching live problems.</p>`;
 }
 
 async function loadLive() {
-  localStorage.setItem("phoenix_admin_token", getToken());
   const listEl = document.getElementById("liveList");
   listEl.innerHTML = `<div class="loading-dots">Loading…</div>`;
   try {
@@ -216,7 +124,7 @@ async function loadLive() {
     renderLiveCategoryCounts();
     applyLiveFilters();
   } catch (err) {
-    listEl.innerHTML = `<div class="result-banner fail">${escapeHtml(err.message)}</div>`;
+    listEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -248,10 +156,6 @@ document.getElementById("tabLive").onclick = () => {
   if (allLiveProblems.length === 0) loadLive();
 };
 
-document.getElementById("loadBtn").onclick = () => {
-  const onLiveTab = document.getElementById("tabLive").classList.contains("active");
-  return onLiveTab ? loadLive() : loadPending();
-};
 document.getElementById("generateBtn").onclick = async () => {
   const btn = document.getElementById("generateBtn");
   btn.disabled = true;
@@ -271,9 +175,4 @@ document.getElementById("generateBtn").onclick = async () => {
   }
 };
 
-document.getElementById("fillMyUserIdBtn").onclick = fillMyUserId;
-document.getElementById("grantAdminBtn").onclick = () => setAdmin(true);
-document.getElementById("revokeAdminBtn").onclick = () => setAdmin(false);
-
-const savedToken = localStorage.getItem("phoenix_admin_token");
-if (savedToken) document.getElementById("adminToken").value = savedToken;
+loadPending();
