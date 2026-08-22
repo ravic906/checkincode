@@ -2633,7 +2633,13 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
         # since a DataFrame/array doesn't behave like a normal boolean
         # under `==` -- both count as "real" here, isinstance/type-only
         # checks are what don't.
-        real_equality_asserts = len(re.findall(r"assert\s+.+(==|\.equals\(|array_equal\()", draft["test_code"]))
+        # DOTALL: a realistic assert's argument (a multi-line list/dict
+        # literal, common for larger test inputs) puts the actual `==`
+        # on a different physical line than the word "assert" -- without
+        # DOTALL, `.` can't cross that newline and every multi-line
+        # assert is invisible to this count, which very nearly shipped a
+        # validation gate that rejected perfectly good multi-line tests.
+        real_equality_asserts = len(re.findall(r"assert\s+.+?(==|\.equals\(|array_equal\()", draft["test_code"], re.DOTALL))
         if real_equality_asserts < 3:
             raise InvalidDraftProblem(
                 f"test_code has only {real_equality_asserts} real equality assertion(s) -- "
