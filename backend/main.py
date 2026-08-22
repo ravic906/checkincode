@@ -24,6 +24,7 @@ Tiering (Postgres-backed, see users.py):
 
 import hmac
 import os
+import re
 
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -825,10 +826,6 @@ def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
     _require_admin(request)
     if req.track not in ("sql", "python"):
         raise HTTPException(400, "track must be 'sql' or 'python'")
-    allowed_topics = (
-        topics.GRADEABLE_TOPICS if req.track == "sql"
-        else py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
-    )
     batch = []
     for pid in req.ids:
         p = problems_module.get_problem(pid)
@@ -837,25 +834,68 @@ def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
     if not batch:
         return {"checked": 0, "relabeled": []}
 
-    try:
-        result = llm.reclassify_topics_batch(
-            user_id="admin", problems=batch, allowed_topics=allowed_topics, track=req.track,
+    if req.track == "sql":
+        buckets = {"sql": (topics.GRADEABLE_TOPICS, batch)}
+    else:
+        # Cross-contamination guard: an LLM asked to pick from one giant
+        # merged list (general + stats + pandas + numpy) reliably reaches
+        # for the "fancier"-sounding specific topic based on loose scenario
+        # association -- a function that counts things per day "sounds"
+        # statistics-y even with zero statistical content. A prompt
+        # instruction saying "don't do that" wasn't reliable in practice
+        # (verified: it kept doing it anyway). Bucketing by actual code
+        # content FIRST, in plain Python, then only offering the LLM
+        # topics from within that one bucket, makes the mistake
+        # structurally impossible rather than just discouraged.
+        pandas_batch, numpy_batch, stats_batch, general_batch = [], [], [], []
+        stats_markers = (
+            "statistics.", "scipy.stats", "np.mean(", "np.std(", "np.var(",
+            "mean(", "median(", "variance(", "stdev(", "correlation",
+            "p_value", "confidence_interval", "z_score", "t_test", "pvalue",
         )
-    except Exception as e:
-        raise HTTPException(502, f"Couldn't reclassify right now ({e}).")
+        for p in batch:
+            code = p.get("canonical_solution") or ""
+            if "import pandas" in code or re.search(r"\bpd\.", code):
+                pandas_batch.append(p)
+            elif "import numpy" in code or re.search(r"\bnp\.", code):
+                numpy_batch.append(p)
+            elif any(m in code for m in stats_markers):
+                stats_batch.append(p)
+            else:
+                general_batch.append(p)
+        buckets = {
+            "pandas": (data_lib_topics.DATA_LIBRARY_TOPICS, pandas_batch),
+            "numpy": (data_lib_topics.DATA_LIBRARY_TOPICS, numpy_batch),
+            "stats": (stats_topics.STATS_TOPICS, stats_batch),
+            "general": (py_topics.PY_GRADEABLE_TOPICS, general_batch),
+        }
 
-    by_id = {p["id"]: p for p in batch}
     relabeled = []
-    for r in result["results"]:
-        pid = r.get("id")
-        new_topic = r.get("topic")
-        if pid not in by_id or new_topic not in allowed_topics:
+    total_checked = 0
+    usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
+    for bucket_name, (allowed_topics, bucket_problems) in buckets.items():
+        if not bucket_problems:
             continue
-        old_topic = by_id[pid]["topic"]
-        if new_topic != old_topic:
-            problems_module.set_problem_topic(pid, new_topic)
-            relabeled.append({"id": pid, "old": old_topic, "new": new_topic})
-    return {"checked": len(batch), "relabeled": relabeled, "usage": result["usage"]}
+        try:
+            result = llm.reclassify_topics_batch(
+                user_id="admin", problems=bucket_problems, allowed_topics=allowed_topics, track=req.track,
+            )
+        except Exception as e:
+            raise HTTPException(502, f"Couldn't reclassify right now ({e}).")
+        by_id = {p["id"]: p for p in bucket_problems}
+        for r in result["results"]:
+            pid = r.get("id")
+            new_topic = r.get("topic")
+            if pid not in by_id or new_topic not in allowed_topics:
+                continue
+            old_topic = by_id[pid]["topic"]
+            if new_topic != old_topic:
+                problems_module.set_problem_topic(pid, new_topic)
+                relabeled.append({"id": pid, "old": old_topic, "new": new_topic, "bucket": bucket_name})
+        total_checked += len(bucket_problems)
+        for k in usage_totals:
+            usage_totals[k] += result["usage"].get(k, 0)
+    return {"checked": total_checked, "relabeled": relabeled, "usage": usage_totals}
 
 
 @app.post("/api/admin/problems/{problem_id}/unpublish")
