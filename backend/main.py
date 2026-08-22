@@ -1449,11 +1449,12 @@ def api_admin_approve(problem_id: str, request: Request):
     # every fresh approval's audit would spuriously flag "no example yet"
     # for something that just hasn't been computed, rather than something
     # actually wrong with the problem.
+    examples_error = None
     try:
         _compute_examples_for_problem(problem_id, approved)
         approved = problems_module.get_problem(problem_id)
-    except Exception:
-        pass  # nice-to-have; a failure here shouldn't block approval or the audit below
+    except Exception as e:
+        examples_error = str(e)  # nice-to-have; a failure here shouldn't block approval or the audit below
 
     # Content-quality audit is now standard for every addition to the
     # bank -- run it the moment a problem goes live, rather than as an
@@ -1468,7 +1469,7 @@ def api_admin_approve(problem_id: str, request: Request):
         audit = _run_audit_for_problem(approved)
     except Exception as e:
         audit = {"error": str(e)}
-    return {"id": problem_id, "status": "live", "audit": audit}
+    return {"id": problem_id, "status": "live", "audit": audit, "examples_error": examples_error}
 
 
 @app.post("/api/admin/problems/{problem_id}/reject")
