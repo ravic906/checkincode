@@ -126,20 +126,51 @@ def extract_examples(*, canonical_solution: str, test_code: str, function_signat
     if not E2B_API_KEY:
         return []
 
+    # OOP problems' function_signature is the class name itself (e.g.
+    # "ProductCounter"), and test_code instantiates it then calls methods
+    # on the instance. Tracing calls TO the class (the old, function-only
+    # approach below) only ever captured the *constructor* -- a real but
+    # useless example (an object's repr is its memory address). Instead,
+    # for classes, patch every public method on the class in place so
+    # instance method calls (pc.add_product("apple") -> None,
+    # pc.get_counts() -> {"apple": 1}) are what gets captured -- that's
+    # the actual observable behavior a student needs to see.
     tracer_source = f"""
 _phoenix_examples = []
 
 {canonical_solution}
 
-_phoenix_orig_fn = {function_signature}
+_phoenix_target = {function_signature}
 
-def _phoenix_tracer(*args, **kwargs):
-    _phoenix_result = _phoenix_orig_fn(*args, **kwargs)
-    if len(_phoenix_examples) < {max_examples}:
-        _phoenix_examples.append({{"args": [repr(a) for a in args], "result": repr(_phoenix_result)}})
-    return _phoenix_result
+import inspect as _phoenix_inspect
 
-{function_signature} = _phoenix_tracer
+if _phoenix_inspect.isclass(_phoenix_target):
+    def _phoenix_wrap_method(_orig_method):
+        def _phoenix_wrapped(self, *args, **kwargs):
+            _phoenix_result = _orig_method(self, *args, **kwargs)
+            if len(_phoenix_examples) < {max_examples}:
+                _phoenix_examples.append({{
+                    "method": _orig_method.__name__,
+                    "args": [repr(a) for a in args],
+                    "result": repr(_phoenix_result),
+                }})
+            return _phoenix_result
+        return _phoenix_wrapped
+
+    for _phoenix_name in list(vars(_phoenix_target)):
+        if _phoenix_name.startswith("__"):
+            continue
+        _phoenix_attr = getattr(_phoenix_target, _phoenix_name)
+        if callable(_phoenix_attr):
+            setattr(_phoenix_target, _phoenix_name, _phoenix_wrap_method(_phoenix_attr))
+else:
+    def _phoenix_tracer(*args, **kwargs):
+        _phoenix_result = _phoenix_target(*args, **kwargs)
+        if len(_phoenix_examples) < {max_examples}:
+            _phoenix_examples.append({{"args": [repr(a) for a in args], "result": repr(_phoenix_result)}})
+        return _phoenix_result
+
+    {function_signature} = _phoenix_tracer
 
 {test_code}
 

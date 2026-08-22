@@ -261,6 +261,13 @@ body {
   overflow-x: auto;
 }
 
+.example-block { margin-bottom: 0; }
+.example-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+.example-row + .example-row { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 8px; }
+.example-call { color: #a5d6ff; }
+.example-arrow { color: var(--muted); }
+.example-result { color: #7ee787; }
+
 .sample-table-wrap { margin-bottom: 16px; overflow-x: auto; }
 .sample-table-wrap h4 { font-size: 12px; color: var(--text); margin: 0 0 6px 0; font-family: "SF Mono", Consolas, monospace; }
 table.data-table { border-collapse: collapse; font-size: 12px; width: 100%; }

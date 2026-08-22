@@ -331,6 +331,37 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Renders the real (never hand-written) sample input/output captured by
+// backend/pysandbox.extract_examples (Python) or the cached canonical_sql
+// result (SQL) -- see problems.examples. Empty/missing examples render
+// nothing rather than an empty section.
+function renderExamples(p) {
+  const ex = p.examples;
+  if (!ex) return "";
+  if (p.track === "python") {
+    if (!Array.isArray(ex) || ex.length === 0) return "";
+    const rows = ex.map(e => {
+      const call = e.method
+        ? `.${escapeHtml(e.method)}(${(e.args || []).map(escapeHtml).join(", ")})`
+        : `${escapeHtml(p.function_signature || "")}(${(e.args || []).map(escapeHtml).join(", ")})`;
+      return `<div class="example-row"><span class="example-call">${call}</span><span class="example-arrow">→</span><span class="example-result">${escapeHtml(e.result)}</span></div>`;
+    }).join("");
+    return `
+      <div class="tables-section">
+        <h3>Sample Input / Output</h3>
+        <div class="schema-block example-block">${rows}</div>
+      </div>
+    `;
+  }
+  if (!ex.columns || !ex.rows || ex.rows.length === 0) return "";
+  return `
+    <div class="tables-section">
+      <h3>Expected Output (sample)</h3>
+      ${renderTable("Query result", ex)}
+    </div>
+  `;
+}
+
 // Minimal markdown-to-HTML for chat answers (Ask Phoenix, mock-interview
 // feedback text) -- operates on already-escaped text throughout, so
 // entities in the model's own output can never become real tags. Handles
@@ -529,6 +560,7 @@ async function loadProblem(id) {
         <h2>${p.title} <span class="pill ${p.difficulty}">${p.difficulty}</span></h2>
         <div class="problem-description markdown-content">${renderMarkdown(p.description)}</div>
       </div>
+      ${renderExamples(p)}
       <div class="editor-section">
         <div class="editor-toolbar">
           <strong>Your Code</strong>
@@ -558,6 +590,7 @@ async function loadProblem(id) {
         <h3>Sample Data</h3>
         ${tablesHtml}
       </div>
+      ${renderExamples(p)}
       <div class="editor-section">
         <div class="editor-toolbar">
           <strong>Your Query</strong>
