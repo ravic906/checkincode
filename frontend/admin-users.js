@@ -1,7 +1,7 @@
 /*
  * Not linked from the main nav -- reached directly at /admin-users.html.
- * Not real auth, just a shared secret (ADMIN_TOKEN) checked server-side;
- * treat this URL itself as something not to publicize.
+ * Accepts either the shared X-Admin-Token secret or a signed-in Clerk
+ * account with is_admin=True (see main.py's _require_admin()).
  */
 
 const ADMIN_API_BASE = window.API_BASE || "http://127.0.0.1:8000";
@@ -12,14 +12,16 @@ function getToken() {
 
 async function adminApi(path, options = {}) {
   const token = getToken();
-  const res = await fetch(`${ADMIN_API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Admin-Token": token,
-      ...(options.headers || {}),
-    },
-  });
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (token) headers["X-Admin-Token"] = token;
+  if (typeof getAuthToken === "function") {
+    const clerkToken = await getAuthToken();
+    if (clerkToken) headers["Authorization"] = `Bearer ${clerkToken}`;
+  }
+  const res = await fetch(`${ADMIN_API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed (${res.status})`);

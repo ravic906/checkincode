@@ -1,7 +1,10 @@
 /*
- * Not linked from the main nav -- reached directly at /admin.html. Not real
- * auth, just a shared secret (ADMIN_TOKEN) checked server-side; treat this
- * URL itself as something not to publicize.
+ * Not linked from the main nav -- reached directly at /admin.html.
+ * Two ways in, both accepted by the backend's _require_admin(): the
+ * original shared X-Admin-Token secret (kept as a bootstrap/fallback
+ * path), or a signed-in Clerk account with is_admin=True. Sign in via
+ * the button auth.js renders, then use "Grant myself admin" once (needs
+ * the token) -- after that, being signed in is enough on its own.
  */
 
 const ADMIN_API_BASE = window.API_BASE || "http://127.0.0.1:8000";
@@ -12,19 +15,30 @@ function getToken() {
 
 async function adminApi(path, options = {}) {
   const token = getToken();
-  const res = await fetch(`${ADMIN_API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Admin-Token": token,
-      ...(options.headers || {}),
-    },
-  });
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (token) headers["X-Admin-Token"] = token;
+  if (typeof getAuthToken === "function") {
+    const clerkToken = await getAuthToken();
+    if (clerkToken) headers["Authorization"] = `Bearer ${clerkToken}`;
+  }
+  const res = await fetch(`${ADMIN_API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed (${res.status})`);
   }
   return res.json();
+}
+
+async function grantMyselfAdmin() {
+  try {
+    const result = await adminApi("/api/admin/grant-admin", { method: "POST" });
+    alert(`Done -- ${result.user_id} is now an admin. You can sign in with this account from now on, no token needed.`);
+  } catch (err) {
+    alert(`Grant admin failed: ${err.message}`);
+  }
 }
 
 function escapeHtml(s) {
@@ -226,6 +240,8 @@ document.getElementById("generateBtn").onclick = async () => {
     btn.textContent = "Generate New Batch";
   }
 };
+
+document.getElementById("grantAdminBtn").onclick = grantMyselfAdmin;
 
 const savedToken = localStorage.getItem("phoenix_admin_token");
 if (savedToken) document.getElementById("adminToken").value = savedToken;

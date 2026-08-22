@@ -181,6 +181,7 @@ def init_schema():
                     interview_trial_used BOOLEAN NOT NULL DEFAULT FALSE,
                     interview_month TEXT,
                     interviews_this_month INTEGER NOT NULL DEFAULT 0,
+                    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
@@ -195,6 +196,9 @@ def init_schema():
             """)
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS interviews_this_month INTEGER NOT NULL DEFAULT 0
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE
             """)
 
 

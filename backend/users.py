@@ -95,6 +95,31 @@ def increment_interview_count(user_id: str):
             cur.execute("UPDATE users SET interviews_this_month = interviews_this_month + 1 WHERE id = %s", (user_id,))
 
 
+def is_admin(user_id: str) -> bool:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            return bool(row and row[0])
+
+
+def grant_admin(user_id: str) -> None:
+    """Marks a real (Clerk-authenticated) user as admin -- the bootstrap
+    step that lets _require_admin() start trusting a signed-in account
+    instead of only the static X-Admin-Token. Upserts so this works even
+    if the user has never hit any other endpoint yet."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (id, tier, usage_date, submissions_today, explanations_today, is_admin)
+                VALUES (%s, 'free', %s, 0, 0, TRUE)
+                ON CONFLICT (id) DO UPDATE SET is_admin = TRUE
+                """,
+                (user_id, _today()),
+            )
+
+
 def get_admin_summary() -> dict:
     """Total users + tier breakdown, for the admin user-analytics page."""
     with db.get_conn() as conn:

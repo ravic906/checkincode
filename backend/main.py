@@ -25,7 +25,7 @@ Tiering (Postgres-backed, see users.py):
 import hmac
 import os
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -663,18 +663,39 @@ class GenerateBatchRequest(BaseModel):
     track: str = "sql"  # "sql" | "python"
 
 
-def _require_admin(x_admin_token: str | None):
+def _require_admin(request: Request):
+    """
+    Accepts either of two independent credentials:
+    - the static X-Admin-Token shared secret (the original scheme --
+      kept as a bootstrap/fallback path, e.g. for the one-time
+      grant-admin call below before any real admin account exists), or
+    - a verified Clerk session (Authorization: Bearer <token>) belonging
+      to a user with is_admin=True in the `users` table.
+    Real per-account authentication is the intended long-term path; the
+    static token isn't being ripped out in the same change that
+    introduces it, since that would lock out admin access the moment
+    this deploys if the grant-admin step hasn't happened yet.
+    """
+    x_admin_token = request.headers.get("x-admin-token")
     # hmac.compare_digest instead of != -- plain string comparison short-
     # circuits on the first differing byte, which leaks how many
     # characters of the token you got right via response-time
     # differences. Doesn't matter much on Render's jittery network, but
     # it's a one-line fix for a real (if low-severity) timing side channel.
-    if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
-        raise HTTPException(403, "Invalid or missing admin token.")
+    if ADMIN_TOKEN and x_admin_token and hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
+        return
+
+    authorization = request.headers.get("authorization")
+    x_user_id = request.headers.get("x-user-id")
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    if users_module.is_admin(user_id):
+        return
+
+    raise HTTPException(403, "Invalid or missing admin credentials.")
 
 
 @app.post("/api/admin/problems/generate-batch")
-def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Header(default=None)):
+def api_admin_generate_batch(req: GenerateBatchRequest, request: Request):
     """
     Drafts a new batch of practice problems via the LLM and stores the
     ones that pass validation as pending_review -- nothing here ever goes
@@ -682,7 +703,7 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
     weekly cron job (render.yaml) calls once 45 days have elapsed since
     the last batch; it's also callable by hand for an out-of-cycle batch.
     """
-    _require_admin(x_admin_token)
+    _require_admin(request)
     if req.track not in ("sql", "python"):
         raise HTTPException(400, "track must be 'sql' or 'python'")
     is_python = req.track == "python"
@@ -734,50 +755,50 @@ def api_admin_generate_batch(req: GenerateBatchRequest, x_admin_token: str = Hea
 
 
 @app.get("/api/admin/problems/pending")
-def api_admin_list_pending(x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_list_pending(request: Request):
+    _require_admin(request)
     return {"problems": problems_module.list_pending_problems()}
 
 
 @app.get("/api/admin/users/summary")
-def api_admin_users_summary(x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_users_summary(request: Request):
+    _require_admin(request)
     return users_module.get_admin_summary()
 
 
 @app.get("/api/admin/stats/solved-by-category")
-def api_admin_solved_by_category(x_admin_token: str = Header(default=None)):
+def api_admin_solved_by_category(request: Request):
     """Platform-wide solved-problem counts by category (sql/python/
     pandas/numpy), for the chart at the top of the admin Users page."""
-    _require_admin(x_admin_token)
+    _require_admin(request)
     return problems_module.get_platform_solved_breakdown()
 
 
 @app.get("/api/admin/users")
-def api_admin_list_users(x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_list_users(request: Request):
+    _require_admin(request)
     return {"users": users_module.list_all_users()}
 
 
 @app.get("/api/admin/users/{user_id}/history")
-def api_admin_user_history(user_id: str, x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_user_history(user_id: str, request: Request):
+    _require_admin(request)
     return {"history": problems_module.get_user_submission_history(user_id)}
 
 
 @app.get("/api/admin/problems/live")
-def api_admin_list_live(x_admin_token: str = Header(default=None)):
+def api_admin_list_live(request: Request):
     """Full live-problem bank for the admin staging-area page -- lets an
     admin find and unpublish an already-live problem (e.g. a duplicate-
     concept one found during a content audit), not just gate new drafts
     before they first go live."""
-    _require_admin(x_admin_token)
+    _require_admin(request)
     return {"problems": problems_module.list_live_problems_full()}
 
 
 @app.post("/api/admin/problems/{problem_id}/unpublish")
-def api_admin_unpublish(problem_id: str, x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_unpublish(problem_id: str, request: Request):
+    _require_admin(request)
     ok = problems_module.unpublish_problem(problem_id)
     if not ok:
         raise HTTPException(404, "Live problem not found.")
@@ -785,8 +806,8 @@ def api_admin_unpublish(problem_id: str, x_admin_token: str = Header(default=Non
 
 
 @app.post("/api/admin/problems/{problem_id}/republish")
-def api_admin_republish(problem_id: str, x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_republish(problem_id: str, request: Request):
+    _require_admin(request)
     ok = problems_module.republish_problem(problem_id)
     if not ok:
         raise HTTPException(404, "Archived problem not found.")
@@ -794,14 +815,14 @@ def api_admin_republish(problem_id: str, x_admin_token: str = Header(default=Non
 
 
 @app.get("/api/admin/problems/{problem_id}")
-def api_admin_get_problem(problem_id: str, x_admin_token: str = Header(default=None)):
+def api_admin_get_problem(problem_id: str, request: Request):
     """
     Full problem detail (any status, bypassing the Pro-tier paywall) for
     content-quality review -- e.g. auditing the live bank for duplicate/
     overlapping concepts. Unlike GET /api/problems/{problem_id}, this
     never checks is_free/tier since it's admin-only.
     """
-    _require_admin(x_admin_token)
+    _require_admin(request)
     p = problems_module.get_problem(problem_id)
     if not p:
         raise HTTPException(404, "Problem not found")
@@ -809,7 +830,7 @@ def api_admin_get_problem(problem_id: str, x_admin_token: str = Header(default=N
 
 
 @app.post("/api/admin/problems/{problem_id}/compute-examples")
-def api_admin_compute_examples(problem_id: str, x_admin_token: str = Header(default=None)):
+def api_admin_compute_examples(problem_id: str, request: Request):
     """
     Computes and stores the real sample input/output shown to students on
     the problem page. For SQL this is just the already-cached real
@@ -820,7 +841,7 @@ def api_admin_compute_examples(problem_id: str, x_admin_token: str = Header(defa
     hand-written example, so it can't drift from what the problem
     actually does.
     """
-    _require_admin(x_admin_token)
+    _require_admin(request)
     p = problems_module.get_problem(problem_id)
     if not p:
         raise HTTPException(404, "Problem not found")
@@ -844,8 +865,8 @@ def api_admin_compute_examples(problem_id: str, x_admin_token: str = Header(defa
 
 
 @app.post("/api/admin/problems/{problem_id}/approve")
-def api_admin_approve(problem_id: str, x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_approve(problem_id: str, request: Request):
+    _require_admin(request)
     ok = problems_module.approve_problem(problem_id)
     if not ok:
         raise HTTPException(404, "Pending problem not found.")
@@ -861,8 +882,8 @@ def api_admin_approve(problem_id: str, x_admin_token: str = Header(default=None)
 
 
 @app.post("/api/admin/problems/{problem_id}/reject")
-def api_admin_reject(problem_id: str, x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_reject(problem_id: str, request: Request):
+    _require_admin(request)
     ok = problems_module.reject_problem(problem_id)
     if not ok:
         raise HTTPException(404, "Pending problem not found.")
@@ -870,8 +891,8 @@ def api_admin_reject(problem_id: str, x_admin_token: str = Header(default=None))
 
 
 @app.get("/api/admin/cadence")
-def api_admin_cadence(x_admin_token: str = Header(default=None)):
-    _require_admin(x_admin_token)
+def api_admin_cadence(request: Request):
+    _require_admin(request)
     return {"last_batch_generated_at": problems_module.get_last_batch_generated_at()}
 
 
@@ -881,11 +902,35 @@ class SetTierRequest(BaseModel):
 
 
 @app.post("/api/admin/set-tier")
-def api_admin_set_tier(req: SetTierRequest, x_admin_token: str = Header(default=None)):
+def api_admin_set_tier(req: SetTierRequest, request: Request):
     """Manually flips a user's tier -- for testing, and for handling a
     refund/dispute by hand later since there's no self-serve downgrade."""
-    _require_admin(x_admin_token)
+    _require_admin(request)
     if req.tier not in ("free", "paid"):
         raise HTTPException(400, "tier must be 'free' or 'paid'")
     users_module.set_tier(req.user_id, req.tier)
     return {"user_id": req.user_id, "tier": req.tier}
+
+
+@app.post("/api/admin/grant-admin")
+def api_admin_grant_admin(request: Request):
+    """
+    One-time bootstrap: marks the CALLER's own signed-in Clerk identity as
+    admin, so future admin requests can rely on that account instead of
+    the static X-Admin-Token. Deliberately requires the static token too
+    (not just being signed in) since this is the step that grants
+    standing admin access in the first place -- and deliberately grants
+    the caller's own identity only, not an arbitrary user_id, so this
+    can't be used to promote anyone else.
+    """
+    x_admin_token = request.headers.get("x-admin-token")
+    if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(403, "Invalid or missing admin token.")
+    authorization = request.headers.get("authorization")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Sign in first, then retry with your session token attached.")
+    user_id = auth.resolve_user_id(authorization, None)
+    if not user_id.startswith("clerk:"):
+        raise HTTPException(401, "Not a valid signed-in session.")
+    users_module.grant_admin(user_id)
+    return {"user_id": user_id, "is_admin": True}

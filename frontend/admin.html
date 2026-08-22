@@ -55,7 +55,10 @@
 <body>
   <div class="admin-header">
     <h1>Problem Staging</h1>
-    <button class="run-btn" id="generateBtn">Generate New Batch</button>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div id="authSection"></div>
+      <button class="run-btn" id="generateBtn">Generate New Batch</button>
+    </div>
   </div>
 
   <div class="admin-nav">
@@ -64,8 +67,9 @@
   </div>
 
   <div class="token-row">
-    <input type="password" id="adminToken" placeholder="Admin token" />
+    <input type="password" id="adminToken" placeholder="Admin token (only needed once, or as fallback)" />
     <button class="submit-btn" id="loadBtn">Load</button>
+    <button class="submit-btn" id="grantAdminBtn" title="Sign in above first, then click this once with the token still filled in">Grant myself admin</button>
   </div>
 
   <div class="staging-tabs">
@@ -92,6 +96,7 @@
   </div>
 
   <script src="config.js"></script>
+  <script src="auth.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>
