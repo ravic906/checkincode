@@ -913,25 +913,32 @@ def api_admin_set_tier(req: SetTierRequest, request: Request):
     return {"user_id": req.user_id, "tier": req.tier}
 
 
-@app.post("/api/admin/grant-admin")
-def api_admin_grant_admin(request: Request):
+class SetAdminRequest(BaseModel):
+    user_id: str
+    is_admin: bool
+
+
+@app.post("/api/admin/set-admin")
+def api_admin_set_admin(req: SetAdminRequest, request: Request):
     """
-    One-time bootstrap: marks the CALLER's own signed-in Clerk identity as
-    admin, so future admin requests can rely on that account instead of
-    the static X-Admin-Token. Deliberately requires the static token too
-    (not just being signed in) since this is the step that grants
-    standing admin access in the first place -- and deliberately grants
-    the caller's own identity only, not an arbitrary user_id, so this
-    can't be used to promote anyone else.
+    Grants or revokes admin rights for an explicit target user_id --
+    same shape as /api/admin/set-tier. Gated by the normal
+    _require_admin() (static token, or an existing Clerk admin), so only
+    someone who is already an admin (or holds the bootstrap token) can
+    designate anyone else as one. Deliberately NOT self-service: there is
+    no "grant myself admin" call a signed-in-but-unprivileged account can
+    make on its own -- the owner looks up the target's user_id (see
+    /api/whoami) and grants it explicitly.
     """
-    x_admin_token = request.headers.get("x-admin-token")
-    if not ADMIN_TOKEN or not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
-        raise HTTPException(403, "Invalid or missing admin token.")
-    authorization = request.headers.get("authorization")
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "Sign in first, then retry with your session token attached.")
-    user_id = auth.resolve_user_id(authorization, None)
-    if not user_id.startswith("clerk:"):
-        raise HTTPException(401, "Not a valid signed-in session.")
-    users_module.grant_admin(user_id)
-    return {"user_id": user_id, "is_admin": True}
+    _require_admin(request)
+    users_module.set_admin(req.user_id, req.is_admin)
+    return {"user_id": req.user_id, "is_admin": req.is_admin}
+
+
+@app.get("/api/whoami")
+def api_whoami(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """Returns the caller's own resolved identity -- lets the owner sign in
+    once and read off their own user_id to grant themselves admin via
+    /api/admin/set-admin, without exposing anything sensitive (this
+    reveals nothing about anyone but the caller themselves)."""
+    return {"user_id": auth.resolve_user_id(authorization, x_user_id)}

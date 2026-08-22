@@ -58,12 +58,20 @@ async function adminApi(path, options = {}) {
   }
 })();
 
-async function grantMyselfAdmin() {
+// Look up the currently signed-in account's own user_id, to pass to
+// POST /api/admin/set-admin (via curl, with the static token) -- there
+// is deliberately no "grant myself admin" self-service call; only an
+// existing admin (or the bootstrap token) can designate anyone, from
+// the server side, never the account itself.
+async function showMyUserId() {
   try {
-    const result = await adminApi("/api/admin/grant-admin", { method: "POST" });
-    alert(`Done -- ${result.user_id} is now an admin. You can sign in with this account from now on, no token needed.`);
+    const result = await adminApi("/api/whoami");
+    prompt(
+      "Your user_id (copy this, then grant it admin yourself via curl + the static token):",
+      result.user_id
+    );
   } catch (err) {
-    alert(`Grant admin failed: ${err.message}`);
+    alert(`Lookup failed: ${err.message}`);
   }
 }
 
@@ -267,7 +275,7 @@ document.getElementById("generateBtn").onclick = async () => {
   }
 };
 
-document.getElementById("grantAdminBtn").onclick = grantMyselfAdmin;
+document.getElementById("grantAdminBtn").onclick = showMyUserId;
 
 const savedToken = localStorage.getItem("phoenix_admin_token");
 if (savedToken) document.getElementById("adminToken").value = savedToken;

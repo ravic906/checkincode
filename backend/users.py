@@ -103,20 +103,20 @@ def is_admin(user_id: str) -> bool:
             return bool(row and row[0])
 
 
-def grant_admin(user_id: str) -> None:
-    """Marks a real (Clerk-authenticated) user as admin -- the bootstrap
-    step that lets _require_admin() start trusting a signed-in account
-    instead of only the static X-Admin-Token. Upserts so this works even
-    if the user has never hit any other endpoint yet."""
+def set_admin(user_id: str, is_admin_value: bool) -> None:
+    """Grants or revokes admin rights for an explicit target -- always
+    called by an existing admin (or the bootstrap static token), never
+    by the target account itself (see /api/admin/set-admin). Upserts so
+    this works even if the target has never hit any other endpoint yet."""
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO users (id, tier, usage_date, submissions_today, explanations_today, is_admin)
-                VALUES (%s, 'free', %s, 0, 0, TRUE)
-                ON CONFLICT (id) DO UPDATE SET is_admin = TRUE
+                VALUES (%s, 'free', %s, 0, 0, %s)
+                ON CONFLICT (id) DO UPDATE SET is_admin = EXCLUDED.is_admin
                 """,
-                (user_id, _today()),
+                (user_id, _today(), is_admin_value),
             )
 
 
