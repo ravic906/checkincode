@@ -553,6 +553,149 @@ def reclassify_topics_batch(*, user_id: str, problems: list[dict], allowed_topic
     return {"results": parsed.get("results", []), "usage": result["usage"]}
 
 
+def audit_problem_quality(
+    *,
+    user_id: str,
+    problem: dict,
+    allowed_topics: list[str],
+    correctness: dict,
+    ask_phoenix_normal: dict,
+    ask_phoenix_edge: dict,
+) -> dict:
+    """
+    Full content-quality judge for one already-live problem -- unlike
+    reclassify_topics_batch (topic-only, code-only), this looks at
+    everything a human reviewer would: is the question actually
+    interview/FAANG-grade, is the topic label right, does the description
+    give students everything they need (the exact bug class found earlier
+    -- "load a CSV" with no filename), is the stated difficulty realistic,
+    does the stored sample input/output look sane, and did Ask Phoenix
+    handle a normal question and an edge-case question well for this
+    specific problem.
+
+    `correctness` is the caller's own objective pass/fail result (from
+    pysandbox.run_python_submission / sandbox.compute_expected_output --
+    never re-derived here, since that's a deterministic check an LLM
+    shouldn't be asked to guess at). `ask_phoenix_normal`/`ask_phoenix_edge`
+    are {"question": str, "answer": str} pairs already captured by calling
+    llm.ask_phoenix() twice before this function runs.
+
+    Returns {"verdict": {...}, "usage": {...}}. On a malformed reply,
+    returns a "needs_fix" verdict with the raw reply in `notes` rather than
+    raising -- one bad judge call should surface as a flagged-for-review
+    row in the audit, not silently drop the problem from the report or
+    crash the whole batch.
+    """
+    if problem.get("track") == "python":
+        content_block = (
+            f"Starter code:\n{problem.get('starter_code') or ''}\n\n"
+            f"Function signature: {problem.get('function_signature')}\n\n"
+            f"Canonical solution:\n{problem.get('canonical_solution')}\n\n"
+            f"Test code:\n{problem.get('test_code')}"
+        )
+    else:
+        content_block = (
+            f"Schema SQL:\n{problem.get('schema_sql')}\n\n"
+            f"Seed SQL:\n{problem.get('seed_sql')}\n\n"
+            f"Canonical SQL:\n{problem.get('canonical_sql')}"
+        )
+
+    correctness_block = (
+        f"Objective correctness check (already run, not your judgment to make): "
+        f"{'PASSED' if correctness.get('passed') else 'FAILED'}"
+        f"{' -- ' + correctness['detail'] if correctness.get('detail') else ''}"
+    )
+
+    user_prompt = (
+        f"ID: {problem['id']}\n"
+        f"Title: {problem['title']}\n"
+        f"Stated difficulty: {problem['difficulty']}\n"
+        f"Stated topic: {problem['topic']}\n"
+        f"Tags: {', '.join(problem.get('tags') or [])}\n\n"
+        f"Description shown to students:\n{problem['description']}\n\n"
+        f"{content_block}\n\n"
+        f"Sample input/output currently shown to students:\n{json.dumps(problem.get('examples'))}\n\n"
+        f"{correctness_block}\n\n"
+        f"--- Ask Phoenix transcript 1 (normal question) ---\n"
+        f"Student asked: {ask_phoenix_normal['question']}\n"
+        f"Phoenix answered: {ask_phoenix_normal['answer']}\n\n"
+        f"--- Ask Phoenix transcript 2 (edge-case question) ---\n"
+        f"Student asked: {ask_phoenix_edge['question']}\n"
+        f"Phoenix answered: {ask_phoenix_edge['answer']}"
+    )
+
+    system_prompt = (
+        "You are auditing one already-live problem on an interview-prep "
+        "platform for real, specific defects a careful human reviewer "
+        "would catch -- not a rubber stamp. Judge each dimension below on "
+        "its own merits; do not let a good score on one inflate another.\n\n"
+        "1. faang_style: would this question feel at home in a real "
+        "FAANG/big-tech technical screen -- realistic scenario, a genuine "
+        "technique being tested, not busywork or a trick of wording? "
+        "A problem that's really just checking whether the student read "
+        "carefully, with no real technical substance, fails this.\n\n"
+        "2. topic_alignment: does the code (not the title or scenario "
+        "framing) actually match the stated topic? Choose the single best "
+        "topic from this allowed list, exact spelling, even if it's the "
+        f"same as the stated one: {', '.join(allowed_topics)}\n\n"
+        "3. description_sufficient: does the description give the student "
+        "literally everything needed to solve it -- no unnamed referenced "
+        "file/table/variable, no missing constraint, no ambiguity about "
+        "what the output should look like? A description that assumes "
+        "context the student can't see (e.g. \"load the CSV\" without ever "
+        "naming it) fails this, even if the underlying problem is fine.\n\n"
+        "4. difficulty_correct: is 'easy'/'medium'/'hard' realistic given "
+        "what the canonical solution actually has to do? Suggest a "
+        "replacement (exactly one of easy/medium/hard) only if you think "
+        "the current label is wrong.\n\n"
+        "5. sample_io_sane: does the stored sample input/output actually "
+        "look like a real, correct, useful example of this problem's "
+        "behavior (not empty, not an object memory address, not "
+        "nonsensical)? An empty/absent sample is acceptable (not every "
+        "problem shape can produce one) -- only fail this if what IS shown "
+        "looks wrong or misleading.\n\n"
+        "6. ask_phoenix_normal_ok / ask_phoenix_edge_ok: judge each Ask "
+        "Phoenix transcript independently. Phoenix has two legitimate "
+        "modes: GUIDE (describe concepts in words, never hand over the "
+        "finished answer) for questions that don't explicitly ask for the "
+        "full solution, and COMPLY FULLY (write the real, complete answer) "
+        "the moment a question unambiguously asks for it (\"just give me "
+        "the code/query\", \"show me the full answer\"). Either mode is "
+        "correct behavior for the RIGHT kind of question -- only fail a "
+        "transcript if Phoenix picked the wrong mode for what was actually "
+        "asked, gave a wrong/misleading technical answer, or the answer "
+        "doesn't actually address this specific problem.\n\n"
+        "Weigh all of the above into overall_verdict: \"pass\" only if "
+        "there is no real issue worth a human's attention; \"needs_fix\" "
+        "if anything above would genuinely need a human to look at it "
+        "before shipping this to real candidates.\n\n"
+        "Respond with ONLY a JSON object, no other text, exactly this shape: "
+        '{"faang_style": {"ok": bool, "reason": "..."}, '
+        '"topic_alignment": {"ok": bool, "suggested_topic": "<exact topic>"}, '
+        '"description_sufficient": {"ok": bool, "reason": "..."}, '
+        '"difficulty_correct": {"ok": bool, "suggested_difficulty": "easy|medium|hard"}, '
+        '"sample_io_sane": {"ok": bool, "reason": "..."}, '
+        '"ask_phoenix_normal_ok": {"ok": bool, "reason": "..."}, '
+        '"ask_phoenix_edge_ok": {"ok": bool, "reason": "..."}, '
+        '"overall_verdict": "pass|needs_fix", '
+        '"notes": "..."}'
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    result = _call_chat_with_retry(
+        user_id=user_id, problem_id=f"audit-{problem['id']}", messages=messages,
+        max_tokens=1200, json_mode=True, timeout=60,
+    )
+    try:
+        verdict = _parse_json_reply(result["reply"])
+    except (json.JSONDecodeError, KeyError):
+        verdict = {"overall_verdict": "needs_fix", "notes": f"Judge reply did not parse as JSON: {result['reply'][:500]}"}
+    return {"verdict": verdict, "usage": result["usage"]}
+
+
 def interview_turn(
     *,
     user_id: str,

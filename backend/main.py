@@ -915,6 +915,118 @@ def api_admin_reclassify_topics(req: ReclassifyRequest, request: Request):
     return {"checked": total_checked, "relabeled": relabeled, "usage": usage_totals}
 
 
+class AuditBatchRequest(BaseModel):
+    ids: list[str]
+
+
+def _audit_ask_phoenix_questions(track: str) -> tuple[str, str]:
+    """Fixed normal/edge-case questions sent to Ask Phoenix for every
+    audited problem, so results are comparable across the whole bank
+    rather than per-problem improvised prompts. Deliberately track-aware
+    (SQL vs Python framing) but not problem-specific -- a generic-but-real
+    student question is exactly what exercises the GUIDE-mode persona; a
+    problem-specific question would need its own LLM call to generate,
+    doubling cost for no real gain in signal."""
+    if track == "python":
+        return (
+            "Can you help me understand the general approach here, and "
+            "what edge cases I should be thinking about?",
+            "What if the input is empty, or has just one element -- would "
+            "my approach still need to handle that correctly?",
+        )
+    return (
+        "What's the general approach to solve this problem?",
+        "What if there are no matching rows at all -- does my query still "
+        "need to handle that case?",
+    )
+
+
+@app.post("/api/admin/problems/audit-batch")
+def api_admin_audit_batch(req: AuditBatchRequest, request: Request):
+    """
+    Full content-quality audit for an explicit batch of already-live
+    problems: objective correctness (reusing the exact same execution
+    paths production grading uses), two real Ask Phoenix exchanges
+    (normal + edge-case question), and one LLM judge call covering
+    FAANG-grade quality / topic alignment / description sufficiency /
+    difficulty calibration / sample-I/O sanity / Ask Phoenix quality (see
+    llm.audit_problem_quality). Purely diagnostic -- never writes
+    anything back to a problem; the caller reviews the report and decides
+    fixes separately.
+
+    Explicit id list (not "audit everything"), same resumable-batch
+    pattern as reclassify-topics -- a 279-problem sweep needs to be driven
+    in small chunks from the caller side, not as one giant request.
+    """
+    _require_admin(request)
+    results = []
+    for pid in req.ids:
+        p = problems_module.get_problem(pid)
+        if not p:
+            results.append({"id": pid, "error": "not found"})
+            continue
+        track = p.get("track", "sql")
+        try:
+            if track == "python":
+                allowed_topics = py_topics.PY_GRADEABLE_TOPICS + stats_topics.STATS_TOPICS + data_lib_topics.DATA_LIBRARY_TOPICS
+                try:
+                    run_result = pysandbox.run_python_submission(student_code=p["canonical_solution"], test_code=p["test_code"])
+                    discriminates = pysandbox.test_code_discriminates(test_code=p["test_code"], function_signature=p["function_signature"])
+                    correctness = {
+                        "passed": bool(run_result["passed"] and discriminates),
+                        "detail": run_result.get("error") or (None if discriminates else "test_code does not discriminate a wrong answer (vacuous test)"),
+                    }
+                except Exception as e:
+                    correctness = {"passed": False, "detail": f"Execution error: {e}"}
+            else:
+                allowed_topics = topics.GRADEABLE_TOPICS
+                try:
+                    cols, rows, _truncated = sandbox.compute_expected_output(p)
+                    correctness = {
+                        "passed": bool(cols) and len(rows) > 0,
+                        "detail": None if (cols and len(rows) > 0) else "canonical_sql produced no rows or no columns",
+                    }
+                except Exception as e:
+                    correctness = {"passed": False, "detail": f"DuckDB error: {e}"}
+
+            normal_q, edge_q = _audit_ask_phoenix_questions(track)
+            usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
+
+            normal_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=normal_q)
+            edge_result = llm.ask_phoenix(user_id="admin", problem=p, current_query=None, conversation=[], question=edge_q)
+            for k in usage_totals:
+                usage_totals[k] += normal_result["usage"].get(k, 0) + edge_result["usage"].get(k, 0)
+
+            judge_result = llm.audit_problem_quality(
+                user_id="admin",
+                problem=p,
+                allowed_topics=allowed_topics,
+                correctness=correctness,
+                ask_phoenix_normal={"question": normal_q, "answer": normal_result["answer"]},
+                ask_phoenix_edge={"question": edge_q, "answer": edge_result["answer"]},
+            )
+            for k in usage_totals:
+                usage_totals[k] += judge_result["usage"].get(k, 0)
+
+            results.append({
+                "id": pid,
+                "title": p["title"],
+                "track": track,
+                "difficulty": p["difficulty"],
+                "topic": p["topic"],
+                "correctness": correctness,
+                "ask_phoenix": {
+                    "normal": {"question": normal_q, "answer": normal_result["answer"]},
+                    "edge": {"question": edge_q, "answer": edge_result["answer"]},
+                },
+                "verdict": judge_result["verdict"],
+                "usage": usage_totals,
+            })
+        except Exception as e:
+            results.append({"id": pid, "title": p.get("title"), "track": track, "error": str(e)})
+    return {"checked": len(results), "results": results}
+
+
 @app.post("/api/admin/problems/{problem_id}/unpublish")
 def api_admin_unpublish(problem_id: str, request: Request):
     _require_admin(request)
