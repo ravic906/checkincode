@@ -2370,6 +2370,12 @@ def get_problem(problem_id: str):
     return dict(row) if row else None
 
 
+def set_problem_topic(problem_id: str, topic: str) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE problems SET topic = %s WHERE id = %s", (topic, problem_id))
+
+
 def set_problem_examples(problem_id: str, examples: list[dict]) -> None:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

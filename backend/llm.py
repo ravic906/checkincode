@@ -460,6 +460,58 @@ def _parse_json_reply(reply: str) -> dict:
     return json.loads(text.strip())
 
 
+def reclassify_topics_batch(*, user_id: str, problems: list[dict], allowed_topics: list[str], track: str) -> dict:
+    """
+    Audits a batch of already-live problems for topic mislabeling -- e.g.
+    a plain `SELECT DISTINCT category` (no string functions at all)
+    tagged "Working with Strings" just because the model that originally
+    drafted it reached for that label without it actually fitting.
+    Classification is based on the real canonical_sql/canonical_solution,
+    never the title or scenario framing, which is what drifts from the
+    real technique in the first place. Returns {"results": [{"id",
+    "topic"}, ...], "usage": {...}} -- callers compare each returned
+    topic against the problem's current one and only write an update
+    where they actually differ.
+    """
+    content_field = "canonical_sql" if track == "sql" else "canonical_solution"
+    blocks = []
+    for p in problems:
+        blocks.append(
+            f'ID: {p["id"]}\nCurrent label: {p["topic"]}\nTitle: {p["title"]}\n'
+            f'Code:\n{p[content_field]}'
+        )
+    user_prompt = "\n\n---\n\n".join(blocks)
+    system_prompt = (
+        "You are auditing a practice-problem bank for a real, specific "
+        "defect: some problems are labeled with a topic that doesn't "
+        "actually match what the code tests -- e.g. a plain `SELECT "
+        "DISTINCT category` (no string functions at all) mislabeled "
+        "'Working with Strings' just because the model that drafted it "
+        "reached for that label without it fitting. For each problem "
+        "below, determine the ONE topic from the allowed list that most "
+        "accurately describes the real technique in the code -- base "
+        "this on the code itself, never the title or business framing, "
+        "since those are exactly what drift from the real technique. If "
+        "the current label is already correct, return it unchanged.\n\n"
+        f"Allowed topics (choose exactly one per problem, copied "
+        f"verbatim): {', '.join(allowed_topics)}\n\n"
+        "Respond with ONLY a JSON object, no other text: "
+        '{"results": [{"id": "...", "topic": "<one allowed topic, exact>"}, ...]} '
+        "-- exactly one entry per problem given."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    result = _call_chat_with_retry(
+        user_id=user_id, problem_id="admin-topic-reclassify", messages=messages,
+        max_tokens=min(3000, max(800, len(problems) * 120)), json_mode=True,
+        timeout=90,
+    )
+    parsed = _parse_json_reply(result["reply"])
+    return {"results": parsed.get("results", []), "usage": result["usage"]}
+
+
 def interview_turn(
     *,
     user_id: str,
