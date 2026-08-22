@@ -1090,6 +1090,16 @@ def _run_audit_for_problem(p: dict) -> dict:
     track = p.get("track", "sql")
     usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
 
+    # Dedup is now a standing part of every audit, not just a one-time
+    # insert-time gate -- re-checked against the CURRENT bank every time
+    # (see problems.check_duplicate), so it also catches drift after the
+    # fact (e.g. a hand-edited title/content that happens to converge
+    # with another problem later). Deterministic, not LLM-judged, so a
+    # real hit always forces needs_fix rather than being just one more
+    # noisy opinion among several.
+    content_field = "canonical_sql" if track == "sql" else "canonical_solution" if track == "python" else "case_prompt"
+    dup_result = problems_module.check_duplicate(p["id"], track, p["title"], p.get(content_field))
+
     if track == "case":
         allowed_topics = case_topics.CASE_TOPICS
         correctness = {"passed": None, "detail": "N/A -- no single verifiable answer for this track"}
@@ -1098,11 +1108,15 @@ def _run_audit_for_problem(p: dict) -> dict:
         )
         for k in usage_totals:
             usage_totals[k] += judge_result["usage"].get(k, 0)
+        verdict = judge_result["verdict"]
+        verdict["duplicate_check"] = dup_result
+        if not dup_result["ok"]:
+            verdict["overall_verdict"] = "needs_fix"
         return {
             "id": p["id"], "title": p["title"], "track": track,
             "difficulty": p["difficulty"], "topic": p["topic"],
             "correctness": correctness, "ask_phoenix": None,
-            "verdict": judge_result["verdict"], "usage": usage_totals,
+            "verdict": verdict, "usage": usage_totals,
         }
 
     if track == "python":
@@ -1144,6 +1158,11 @@ def _run_audit_for_problem(p: dict) -> dict:
     for k in usage_totals:
         usage_totals[k] += judge_result["usage"].get(k, 0)
 
+    verdict = judge_result["verdict"]
+    verdict["duplicate_check"] = dup_result
+    if not dup_result["ok"]:
+        verdict["overall_verdict"] = "needs_fix"
+
     return {
         "id": p["id"],
         "title": p["title"],
@@ -1155,7 +1174,7 @@ def _run_audit_for_problem(p: dict) -> dict:
             "normal": {"question": normal_q, "answer": normal_result["answer"]},
             "edge": {"question": edge_q, "answer": edge_result["answer"]},
         },
-        "verdict": judge_result["verdict"],
+        "verdict": verdict,
         "usage": usage_totals,
     }
 

@@ -2481,6 +2481,77 @@ def list_existing_titles() -> list[str]:
             return [row[0] for row in cur.fetchall()]
 
 
+def list_existing_titles_with_ids(exclude_id: str | None = None) -> list[tuple[str, str]]:
+    """(title, id) pairs for every live/pending problem -- id-aware
+    sibling of list_existing_titles(), for the standard content-quality
+    audit's duplicate check, which needs to report WHICH existing
+    problem a near-duplicate matches, not just that one exists.
+    `exclude_id` leaves the problem being audited out of its own
+    comparison set."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT title, id FROM problems WHERE status IN ('live', 'pending_review') AND id != %s",
+                (exclude_id or "",),
+            )
+            return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def list_existing_canonical_content_with_ids(track: str, exclude_id: str | None = None) -> list[tuple[str, str]]:
+    """(normalized_content, id) pairs -- id-aware sibling of
+    list_existing_canonical_content(), same reason as
+    list_existing_titles_with_ids() above."""
+    field = "canonical_sql" if track == "sql" else "canonical_solution" if track == "python" else "case_prompt"
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {field}, id FROM problems WHERE status IN ('live', 'pending_review') AND track = %s AND id != %s",
+                (track, exclude_id or ""),
+            )
+            return [(_normalize_code_structure(row[0]), row[1]) for row in cur.fetchall() if row[0]]
+
+
+def check_duplicate(problem_id: str, track: str, title: str, content: str | None) -> dict:
+    """
+    Checks whether an already-live/pending problem is a near-duplicate of
+    another one on the same track -- the same title-similarity and
+    structural-code-normalization checks insert_pending_draft runs
+    against a brand-new draft, re-run here as a standing part of the
+    content-quality audit (see main.py's _run_audit_for_problem). Unlike
+    the insert-time check, this runs against the CURRENT bank every time
+    the audit runs (at every approval, and on any later re-audit), so it
+    keeps catching duplicates even if something changes later -- e.g. a
+    problem's title or canonical content gets hand-edited after it was
+    first inserted (via set-description/patch-content) in a way that
+    happens to converge with another problem that already existed.
+
+    `content` is canonical_sql/canonical_solution/case_prompt depending
+    on track -- callers pass whichever field applies.
+
+    Returns {"ok": bool, "reason": str, "similar_to": id | None}.
+    """
+    for other_title, other_id in list_existing_titles_with_ids(exclude_id=problem_id):
+        ratio = difflib.SequenceMatcher(None, title.lower(), other_title.lower()).ratio()
+        if ratio >= DUPLICATE_TITLE_THRESHOLD:
+            return {
+                "ok": False,
+                "reason": f"Title is {ratio:.2f} similar to '{other_title}' ({other_id})",
+                "similar_to": other_id,
+            }
+
+    normalized = _normalize_code_structure(content or "")
+    if normalized:
+        for other_normalized, other_id in list_existing_canonical_content_with_ids(track, exclude_id=problem_id):
+            if other_normalized == normalized:
+                return {
+                    "ok": False,
+                    "reason": f"Structurally identical content to {other_id}",
+                    "similar_to": other_id,
+                }
+
+    return {"ok": True, "reason": "", "similar_to": None}
+
+
 def list_problems_summary(difficulty: str | None = None, tag: str | None = None, topic: str | None = None, user_id: str | None = None, track: str | None = None):
     query = "SELECT id, title, difficulty, topic, tags, is_free, track FROM problems WHERE status = 'live'"
     params = []
