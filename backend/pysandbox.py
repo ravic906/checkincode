@@ -143,16 +143,47 @@ _phoenix_examples = []
 _phoenix_target = {function_signature}
 
 import inspect as _phoenix_inspect
+import itertools as _phoenix_itertools
+
+def _phoenix_safe_repr(v):
+    # A plain repr() is actively misleading for two common return/arg
+    # shapes: a domain object with no __repr__ override shows its memory
+    # address ("<Employee object at 0x...>"), and a generator shows its
+    # own object repr instead of the values it would actually yield.
+    # Recurses into list/tuple/set so a list of such objects doesn't slip
+    # through unhandled.
+    try:
+        if _phoenix_inspect.isgenerator(v):
+            return "yields: " + repr([_phoenix_safe_repr(x) for x in _phoenix_itertools.islice(v, 5)])
+        if isinstance(v, (list, tuple, set)):
+            opener, closer = {{"list": ("[", "]"), "tuple": ("(", ")"), "set": ("{{", "}}")}}[type(v).__name__]
+            return opener + ", ".join(_phoenix_safe_repr(x) for x in v) + closer
+        if hasattr(v, "__dict__") and type(v).__repr__ is object.__repr__:
+            return type(v).__name__ + repr(vars(v))
+        return repr(v)
+    except Exception:
+        return repr(v)
+
+def _phoenix_capture_result(result):
+    # Peeking into a generator to describe it must not consume the actual
+    # generator test_code still holds a reference to and will keep
+    # iterating -- tee() forks it into two independent iterators so the
+    # real one returned to the caller is untouched.
+    if _phoenix_inspect.isgenerator(result):
+        _peek, _real = _phoenix_itertools.tee(result)
+        return "yields: " + repr([_phoenix_safe_repr(x) for x in _phoenix_itertools.islice(_peek, 5)]), _real
+    return _phoenix_safe_repr(result), result
 
 if _phoenix_inspect.isclass(_phoenix_target):
     def _phoenix_wrap_method(_orig_method):
         def _phoenix_wrapped(self, *args, **kwargs):
             _phoenix_result = _orig_method(self, *args, **kwargs)
+            _phoenix_result_repr, _phoenix_result = _phoenix_capture_result(_phoenix_result)
             if len(_phoenix_examples) < {max_examples}:
                 _phoenix_examples.append({{
                     "method": _orig_method.__name__,
-                    "args": [repr(a) for a in args],
-                    "result": repr(_phoenix_result),
+                    "args": [_phoenix_safe_repr(a) for a in args],
+                    "result": _phoenix_result_repr,
                 }})
             return _phoenix_result
         return _phoenix_wrapped
@@ -166,8 +197,9 @@ if _phoenix_inspect.isclass(_phoenix_target):
 else:
     def _phoenix_tracer(*args, **kwargs):
         _phoenix_result = _phoenix_target(*args, **kwargs)
+        _phoenix_result_repr, _phoenix_result = _phoenix_capture_result(_phoenix_result)
         if len(_phoenix_examples) < {max_examples}:
-            _phoenix_examples.append({{"args": [repr(a) for a in args], "result": repr(_phoenix_result)}})
+            _phoenix_examples.append({{"args": [_phoenix_safe_repr(a) for a in args], "result": _phoenix_result_repr}})
         return _phoenix_result
 
     {function_signature} = _phoenix_tracer
