@@ -164,7 +164,7 @@ async function refreshTierBadge() {
     // looks generous on its own ("0/20 submissions" reads like broad
     // access). Deliberately no exact counts here (bank size and
     // free-tier fraction aren't things we want to publish in the UI).
-    badge.innerHTML = `Free — limited problem access <button id="upgradeBtn">Upgrade ₹199/mo</button>`;
+    badge.innerHTML = `Free — limited problem access <button id="upgradeBtn">Upgrade ${priceWithLocalEstimate(199)}</button>`;
   }
   const btn = document.getElementById("upgradeBtn");
   if (btn) btn.onclick = doUpgrade;
@@ -345,6 +345,38 @@ function renderTable(name, table) {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Billing itself always stays in INR via Razorpay -- this is purely a
+// secondary display convenience so the price doesn't read as India-only
+// to a visitor from elsewhere. Static, occasionally-stale conversion
+// table rather than a live FX API call: this is a low-stakes rough
+// number, not something that needs real-time precision, and avoids
+// pulling in another external dependency for it.
+const REGION_CURRENCY = {
+  US: "USD", GB: "GBP", CA: "CAD", AU: "AUD", NZ: "NZD",
+  DE: "EUR", FR: "EUR", ES: "EUR", IT: "EUR", NL: "EUR", IE: "EUR", PT: "EUR",
+  SG: "SGD", AE: "AED", JP: "JPY", ZA: "ZAR", BR: "BRL", MX: "MXN",
+};
+const INR_PER_UNIT = {
+  USD: 83, GBP: 105, CAD: 61, AUD: 55, NZD: 51,
+  EUR: 90, SGD: 62, AED: 22.6, JPY: 0.56, ZAR: 4.5, BRL: 14, MXN: 4.1,
+};
+const CURRENCY_SYMBOL = {
+  USD: "$", GBP: "£", CAD: "C$", AUD: "A$", NZD: "NZ$",
+  EUR: "€", SGD: "S$", AED: "AED ", JPY: "¥", ZAR: "R", BRL: "R$", MXN: "MX$",
+};
+function priceWithLocalEstimate(inrAmount) {
+  const base = `₹${inrAmount}/mo`;
+  try {
+    const region = (navigator.language || "").split("-")[1]?.toUpperCase();
+    const currency = region && region !== "IN" ? REGION_CURRENCY[region] : null;
+    if (!currency) return base;
+    const converted = (inrAmount / INR_PER_UNIT[currency]).toFixed(2);
+    return `${base} (≈ ${CURRENCY_SYMBOL[currency]}${converted}/mo)`;
+  } catch (e) {
+    return base;
+  }
 }
 
 // Renders the real (never hand-written) sample input/output captured by
@@ -549,7 +581,7 @@ function showUpsell() {
   updateAskPhoenixFabVisibility();
   document.getElementById("workspace").innerHTML = `
     <div class="empty-state upsell-box">
-      This problem is part of Pro. Upgrade to ₹199/mo to unlock every practice problem.
+      This problem is part of Pro. Upgrade to ${priceWithLocalEstimate(199)} to unlock every practice problem.
       <br/><button id="inlineUpgradeBtn">Upgrade now</button>
     </div>
   `;
@@ -803,7 +835,7 @@ async function runQuery(isSubmit) {
       resultsSection.innerHTML = `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
     } else if (e.status === 402) {
       resultsSection.innerHTML = `<div class="upsell-box">
-        This problem is part of Pro. Upgrade to ₹199/mo to unlock every practice problem.
+        This problem is part of Pro. Upgrade to ${priceWithLocalEstimate(199)} to unlock every practice problem.
         <br/><button id="inlineUpgradeBtn">Upgrade now</button>
       </div>`;
       document.getElementById("inlineUpgradeBtn").onclick = doUpgrade;
@@ -881,7 +913,7 @@ function renderAskPhoenixBody() {
     body.innerHTML = `
       <div class="upsell-box">
         Ask Phoenix is a Pro feature -- get contextual AI help on any problem, any time, not just after a wrong answer.
-        Upgrade to ₹199/mo to unlock it.
+        Upgrade to ${priceWithLocalEstimate(199)} to unlock it.
         <br/><button id="askPhoenixUpgradeBtn">Upgrade now</button>
       </div>
     `;
