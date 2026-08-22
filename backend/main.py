@@ -207,6 +207,7 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "interview_trial_used": u["interview_trial_used"],
         "interviews_this_month": u["interviews_this_month"],
         "max_interviews_per_month": MAX_INTERVIEWS_PER_MONTH,
+        "is_admin": users_module.is_admin(user_id),
     }
 
 

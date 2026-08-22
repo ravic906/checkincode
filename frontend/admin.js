@@ -32,6 +32,32 @@ async function adminApi(path, options = {}) {
   return res.json();
 }
 
+// Client-side gate: not a real security boundary (this is a static file,
+// its source is always fetchable), but stops an outsider who found the
+// URL from ever seeing real admin UI/data -- someone holding the static
+// token still gets in (needed for the bootstrap grant-admin step below),
+// otherwise this requires a signed-in Clerk account with is_admin=True.
+(async function enforceAdminGate() {
+  if (getToken()) return;
+  try {
+    if (typeof waitForClerk === "function") await waitForClerk();
+  } catch { /* falls through to the redirect below */ }
+  if (typeof isSignedIn !== "function" || !isSignedIn()) {
+    window.location.href = "index.html";
+    return;
+  }
+  try {
+    const clerkToken = await getAuthToken();
+    const res = await fetch(`${ADMIN_API_BASE}/api/usage`, {
+      headers: { Authorization: `Bearer ${clerkToken}` },
+    });
+    const data = await res.json();
+    if (!data.is_admin) window.location.href = "index.html";
+  } catch {
+    window.location.href = "index.html";
+  }
+})();
+
 async function grantMyselfAdmin() {
   try {
     const result = await adminApi("/api/admin/grant-admin", { method: "POST" });

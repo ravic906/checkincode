@@ -152,6 +152,7 @@ async function refreshTierBadge() {
   }
   const btn = document.getElementById("upgradeBtn");
   if (btn) btn.onclick = doUpgrade;
+  document.getElementById("adminNavLink").style.display = usage.is_admin ? "inline-flex" : "none";
   return usage;
 }
 

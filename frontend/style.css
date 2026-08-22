@@ -103,6 +103,18 @@ body {
 }
 .reset-progress-btn:hover { border-color: var(--red); color: var(--red); }
 
+.admin-nav-link {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 10px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.admin-nav-link:hover { border-color: var(--accent); color: var(--accent); }
+
 .auth-section { display: flex; align-items: center; }
 .signin-btn {
   font-size: 12px;
