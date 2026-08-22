@@ -114,10 +114,21 @@ class InterviewEndRequest(BaseModel):
 @app.get("/api/topics")
 def api_topics():
     """Exposes the topic taxonomy so the frontend doesn't have to hand-
-    duplicate topics.py's lists as a drift-prone JS array -- used to decide
-    which interview-feedback "topics to study" pills can link into the
-    practice bank (only GRADEABLE_TOPICS have matching problems)."""
-    return {"gradeable": topics.GRADEABLE_TOPICS, "all": topics.ALL_TOPICS}
+    duplicate topics.py's lists as a drift-prone JS array. `gradeable`/
+    `all` stay SQL-only and unchanged -- interview-feedback "topics to
+    study" pills link into the SQL practice bank specifically, since
+    Mock Interview stays SQL-only. `python`, `stats`, and `data_lib` are
+    additive: the Python-track equivalents (general Cookbook topics,
+    the cross-track statistics topic lens, and the pandas/numpy topic
+    lens), for any consumer that needs the full taxonomy rather than
+    just whatever happens to be live right now."""
+    return {
+        "gradeable": topics.GRADEABLE_TOPICS,
+        "all": topics.ALL_TOPICS,
+        "python": py_topics.PY_GRADEABLE_TOPICS,
+        "stats": stats_topics.STATS_TOPICS,
+        "data_lib": data_lib_topics.DATA_LIBRARY_TOPICS,
+    }
 
 
 @app.get("/api/problems")
