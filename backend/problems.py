@@ -2663,6 +2663,71 @@ def get_user_submission_history(user_id: str) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def get_user_progress(user_id: str) -> dict:
+    """Backs the Progress Board: aggregates the user's real submission
+    history into verified-solve counts, first-run pass rate, per-topic
+    readiness (solved vs. total live problems in that topic), a daily
+    activity count for the last 30 days, and the most recent submissions.
+    All numbers are derived from `submissions`/`problems` directly --
+    nothing here is estimated or simulated."""
+    history = get_user_submission_history(user_id)  # newest first
+
+    solved_ids = {h["problem_id"] for h in history if h["correct"]}
+    problems_verified = len(solved_ids)
+
+    first_attempt = {}
+    for h in reversed(history):  # oldest first, so first_attempt sticks
+        first_attempt.setdefault(h["problem_id"], h["correct"])
+    first_run_pass_rate = (
+        round(100 * sum(1 for v in first_attempt.values() if v) / len(first_attempt))
+        if first_attempt else 0
+    )
+
+    topic_totals: dict[str, int] = {}
+    for p in list_all_live_problems():
+        topic_totals[p["topic"]] = topic_totals.get(p["topic"], 0) + 1
+    topic_solved: dict[str, set] = {}
+    for h in history:
+        if h["correct"] and h["topic"]:
+            topic_solved.setdefault(h["topic"], set()).add(h["problem_id"])
+    topics = [
+        {
+            "name": topic,
+            "solved": len(topic_solved.get(topic, ())),
+            "total": total,
+        }
+        for topic, total in sorted(topic_totals.items(), key=lambda kv: -kv[1])
+        if topic_solved.get(topic) or total >= 3  # skip near-empty topics with zero activity
+    ]
+
+    from datetime import datetime, timedelta, timezone
+    today = datetime.now(timezone.utc).date()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(29, -1, -1)]
+    activity_counts = {d: 0 for d in days}
+    for h in history:
+        day = h["submitted_at"].date().isoformat() if h["submitted_at"] else None
+        if day in activity_counts:
+            activity_counts[day] += 1
+    activity = [{"date": d, "count": activity_counts[d]} for d in days]
+
+    recent = [
+        {
+            "title": h["title"],
+            "correct": h["correct"],
+            "submitted_at": h["submitted_at"].isoformat() if h["submitted_at"] else None,
+        }
+        for h in history[:8]
+    ]
+
+    return {
+        "problems_verified": problems_verified,
+        "first_run_pass_rate": first_run_pass_rate,
+        "topics": topics,
+        "activity": activity,
+        "recent": recent,
+    }
+
+
 def reset_user_submissions(user_id: str) -> int:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

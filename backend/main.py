@@ -238,6 +238,14 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
     }
 
 
+@app.get("/api/progress")
+def api_progress(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    progress = problems_module.get_user_progress(user_id)
+    progress["mock_interviews"] = users_module.get_usage(user_id)["interviews_this_month"]
+    return progress
+
+
 @app.delete("/api/submissions")
 def api_reset_submissions(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """Wipes all of the requesting user's submission history (solved
