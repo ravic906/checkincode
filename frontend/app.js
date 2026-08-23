@@ -1019,31 +1019,12 @@ async function refreshIdentityDependentState() {
 }
 
 async function init() {
-  const problemsRes = await api("/api/problems");
-  allProblems = problemsRes.problems;
-  await refreshTierBadge();
-  populateTopicFilter();
-  populateTagFilter();
-  renderProblemList();
-
-  // The very first api() calls above race Clerk's async script load --
-  // isSignedIn() is almost always still false at that instant even for a
-  // signed-in user, so that first render silently uses the anonymous
-  // identity instead. Once Clerk actually finishes loading (and on every
-  // subsequent sign-in/out), refresh so tier/locked/solved reflect who's
-  // really signed in.
-  if (typeof waitForClerk === "function") {
-    waitForClerk()
-      .then((Clerk) => {
-        refreshIdentityDependentState();
-        Clerk.addListener(() => refreshIdentityDependentState());
-      })
-      .catch(() => {
-        // Clerk failed to load -- practice mode still works anonymously,
-        // nothing further to do here.
-      });
-  }
-
+  // Wire up every click handler FIRST, synchronously, before any network
+  // call -- these must never be gated behind a fetch. They used to all be
+  // attached only after `await refreshTierBadge()` resolved, which meant
+  // a slow /api/usage response (a Render free-tier cold start, or just
+  // ordinary latency) left the ENTIRE page unclickable -- including the
+  // homepage track cards -- until that one unrelated call finished.
   document.getElementById("difficultyFilter").onchange = renderProblemList;
   document.getElementById("topicFilter").onchange = () => {
     activeTopicFilter = document.getElementById("topicFilter").value || null;
@@ -1075,6 +1056,40 @@ async function init() {
     showInterviewScreen();
     if (window.renderInterviewSetup) window.renderInterviewSetup();
   };
+
+  // The tier badge is independent of everything else on the page --
+  // fire it off in the background rather than awaiting it, so a slow
+  // /api/usage response never blocks anything the user might do first.
+  refreshTierBadge();
+
+  // The problem list itself IS needed before the URL-restore logic below
+  // can show the right track/problem, so this one still has to be
+  // awaited -- but note allProblems defaults to [] and every handler
+  // above is already live, so a click landing before this resolves just
+  // renders an empty list momentarily rather than doing nothing at all.
+  const problemsRes = await api("/api/problems");
+  allProblems = problemsRes.problems;
+  populateTopicFilter();
+  populateTagFilter();
+  renderProblemList();
+
+  // The very first api() calls above race Clerk's async script load --
+  // isSignedIn() is almost always still false at that instant even for a
+  // signed-in user, so that first render silently uses the anonymous
+  // identity instead. Once Clerk actually finishes loading (and on every
+  // subsequent sign-in/out), refresh so tier/locked/solved reflect who's
+  // really signed in.
+  if (typeof waitForClerk === "function") {
+    waitForClerk()
+      .then((Clerk) => {
+        refreshIdentityDependentState();
+        Clerk.addListener(() => refreshIdentityDependentState());
+      })
+      .catch(() => {
+        // Clerk failed to load -- practice mode still works anonymously,
+        // nothing further to do here.
+      });
+  }
 
   // Restore whatever track/problem was in the URL (see syncUrl()) so a
   // page refresh lands back where you were instead of always resetting
