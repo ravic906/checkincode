@@ -62,9 +62,28 @@ app.add_middleware(
 FREE_DAILY_SUBMISSIONS = 20
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
+# How many of a SQL problem's datasets the free/fast "Run" action checks --
+# a quick iteration signal, not the real judgment. Submit always checks
+# every dataset the problem has (see _grade_sql_submission).
+SQL_RUN_TEST_CASE_COUNT = 2
+
 # Precompute expected output for every problem once at startup so grading
-# doesn't re-run the canonical query on every submission.
+# doesn't re-run the canonical query on every submission. Each entry is a
+# LIST of (columns, rows) tuples -- index 0 is the primary/visible
+# seed_sql's expected output, indices 1+ are each hidden
+# problem_test_cases dataset's own expected output (see
+# problems.get_test_case_seeds). A problem not yet backfilled with hidden
+# datasets simply has a one-element list, which grades exactly as the
+# single-dataset model did before hidden test cases existed.
 _EXPECTED_CACHE = {}
+
+
+def _compute_expected_cache_entry(p: dict) -> list[tuple]:
+    entry = [sandbox.compute_expected_output(p)[:2]]
+    for seed_sql in problems_module.get_test_case_seeds(p["id"]):
+        case_problem = {"schema_sql": p["schema_sql"], "seed_sql": seed_sql, "canonical_sql": p["canonical_sql"]}
+        entry.append(sandbox.compute_expected_output(case_problem)[:2])
+    return entry
 
 
 @app.on_event("startup")
@@ -79,8 +98,7 @@ def _startup():
                 # pysandbox on every submit, not diffed against a cached
                 # expected output -- nothing to precompute here.
                 continue
-            cols, rows, _ = sandbox.compute_expected_output(p)
-            _EXPECTED_CACHE[p["id"]] = (cols, rows)
+            _EXPECTED_CACHE[p["id"]] = _compute_expected_cache_entry(p)
 
 
 class SubmitRequest(BaseModel):
@@ -389,38 +407,77 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
         problems_module.record_submission(user_id, problem["id"], result["correct"])
         return result
 
-    result = {
-        "correct": False,
-        "error": None,
-        "actual_preview": None,
-        "expected_preview": None,
-    }
+    result = _grade_sql_submission(problem, req.query)
+    problems_module.record_submission(user_id, problem["id"], result["correct"])
+    return result
 
+
+def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = None) -> dict:
+    """
+    Runs `query` against `problem`'s primary seed_sql plus its hidden
+    problem_test_cases datasets, sliced to the first `num_cases` of them
+    if given (Run uses a short slice for a fast iteration signal; Submit
+    passes None for the full set -- only Submit can mark a problem
+    solved). A wrong-but-plausible query has to coincidentally agree with
+    canonical_sql across every dataset checked, not just one fixed one.
+    Returns the same result shape SQL submissions have always returned,
+    reporting the first failing dataset's actual/expected preview.
+    """
+    all_seeds = [problem["seed_sql"]] + problems_module.get_test_case_seeds(problem["id"])
+    expected_per_case = _EXPECTED_CACHE[problem["id"]]
+    if num_cases is not None:
+        all_seeds = all_seeds[:num_cases]
+        expected_per_case = expected_per_case[:num_cases]
+
+    result = {"correct": False, "error": None, "actual_preview": None, "expected_preview": None}
     try:
-        columns, rows, truncated = sandbox.run_query_against_problem(problem, req.query)
+        outcome = sandbox.run_query_against_test_cases(problem, query, all_seeds, expected_per_case)
     except (sandbox.SqlValidationError, sandbox.SqlTimeoutError) as e:
         result["error"] = str(e)
+        return result
     except duckdb.Error as e:
         result["error"] = f"SQL error: {e}"
-    else:
-        expected_columns, expected_rows = _EXPECTED_CACHE[problem["id"]]
-        is_correct, diff = sandbox.compare_results(
-            expected_columns, expected_rows, columns, rows, problem["order_matters"]
-        )
-        result["correct"] = is_correct
-        result["actual_preview"] = _preview(columns, [[sandbox._normalize_cell(v) for v in r] for r in rows])
-        if not is_correct:
-            result["error"] = diff
+        return result
 
-    problems_module.record_submission(user_id, problem["id"], result["correct"])
-
-    if not result["correct"]:
-        expected_columns, expected_rows = _EXPECTED_CACHE[problem["id"]]
+    result["correct"] = outcome["correct"]
+    result["actual_preview"] = _preview(
+        outcome["columns"], [[sandbox._normalize_cell(v) for v in r] for r in outcome["rows"]]
+    )
+    if not outcome["correct"]:
+        result["error"] = outcome["diff"]
         result["expected_preview"] = _preview(
-            expected_columns, [[sandbox._normalize_cell(v) for v in r] for r in expected_rows]
+            outcome["expected_columns"], [[sandbox._normalize_cell(v) for v in r] for r in outcome["expected_rows"]]
+        )
+    return result
+
+
+@app.post("/api/run")
+def api_run(req: SubmitRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Fast iteration check while writing a query -- SQL only for now (the
+    thing this exists to let a student sanity-check is exactly the new
+    multi-dataset grading; Python/Business-Case submissions already run
+    their real grading path with no lighter-weight variant to offer).
+    Deliberately does NOT call increment_submission or record_submission:
+    Run never touches the daily quota and can never mark a problem
+    solved, only Submit can -- see _grade_sql_submission's docstring.
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    problem = get_problem(req.problem_id)
+    if not problem:
+        raise HTTPException(404, "Problem not found")
+    if problem.get("track") != "sql":
+        raise HTTPException(400, "Run is only available for SQL problems right now -- use Submit.")
+
+    u = users_module.get_usage(user_id)
+    if not problem["is_free"] and u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "This problem is part of the Pro problem bank (₹199/mo). "
+            "Free tier includes a curated sample -- upgrade to unlock all problems.",
         )
 
-    return result
+    return _grade_sql_submission(problem, req.query, num_cases=SQL_RUN_TEST_CASE_COUNT)
 
 
 @app.post("/api/ask-phoenix")
@@ -1313,6 +1370,54 @@ def api_admin_merge_topics(req: MergeTopicsRequest, request: Request):
     return {"old_topics": req.old_topics, "new_topic": req.new_topic, "changed": changed}
 
 
+class BackfillTestCasesRequest(BaseModel):
+    ids: list[str]
+    count: int = problems_module.SQL_HIDDEN_TEST_CASE_COUNT
+
+
+@app.post("/api/admin/problems/backfill-test-cases")
+def api_admin_backfill_test_cases(req: BackfillTestCasesRequest, request: Request):
+    """
+    Backfills hidden, adversarially-constructed seed datasets for existing
+    live SQL problems that predate this feature (grading was previously
+    single-dataset for all of them -- see llm.generate_discriminating_test_cases
+    for what "adversarially-constructed" means here). Explicit id list,
+    never "all" in one call -- same resumable-batch pattern as
+    merge-topics/audit-batch, since the full live SQL bank is too much for
+    one request/timeout budget.
+
+    Clears any existing problem_test_cases rows for a given id first, so
+    re-running this on an already-backfilled problem (e.g. after a manual
+    seed_sql edit) replaces rather than piles on top of stale datasets.
+    Refreshes _EXPECTED_CACHE immediately per problem so real grading
+    picks up the new datasets without a restart.
+    """
+    _require_admin(request)
+    if not req.ids:
+        raise HTTPException(400, "ids must be a non-empty list.")
+    results = []
+    for pid in req.ids:
+        p = problems_module.get_problem(pid)
+        if not p or p.get("track", "sql") != "sql":
+            results.append({"id": pid, "error": "not found or not a SQL-track problem"})
+            continue
+        try:
+            problems_module.clear_test_case_seeds(pid)
+            gen_result = llm.generate_discriminating_test_cases(user_id="admin", problem=p, count=req.count)
+            for case in gen_result["validated"]:
+                problems_module.add_test_case_seed(pid, case["seed_sql"], case["defeats_wrong_query"])
+            refreshed = problems_module.get_problem(pid)
+            _EXPECTED_CACHE[pid] = _compute_expected_cache_entry(refreshed)
+            results.append({
+                "id": pid, "title": p["title"],
+                "requested": req.count, "validated": len(gen_result["validated"]),
+                "usage": gen_result["usage"],
+            })
+        except Exception as e:
+            results.append({"id": pid, "title": p.get("title"), "error": str(e)})
+    return {"checked": len(results), "results": results}
+
+
 class SetDescriptionRequest(BaseModel):
     description: str
 
@@ -1428,8 +1533,7 @@ def api_admin_patch_content(problem_id: str, req: PatchContentRequest, request: 
 
     if track == "sql" and any(k in updates for k in ("canonical_sql", "seed_sql", "schema_sql")):
         refreshed = problems_module.get_problem(problem_id)
-        cols, rows, _truncated = sandbox.compute_expected_output(refreshed)
-        _EXPECTED_CACHE[problem_id] = (cols, rows)
+        _EXPECTED_CACHE[problem_id] = _compute_expected_cache_entry(refreshed)
 
     return {"id": problem_id, "updated_fields": list(updates.keys()), "verified": True}
 
@@ -1493,7 +1597,7 @@ def _compute_examples_for_problem(problem_id: str, p: dict) -> dict | list | Non
         return None
 
     if problem_id in _EXPECTED_CACHE:
-        cols, rows = _EXPECTED_CACHE[problem_id]
+        cols, rows = _EXPECTED_CACHE[problem_id][0]  # primary dataset -- the one shown to students
     else:
         cols, rows, _ = sandbox.compute_expected_output(p)
     example = {"columns": cols, "rows": [[sandbox._normalize_cell(v) for v in row] for row in rows[:3]]}
@@ -1523,8 +1627,7 @@ def api_admin_approve(problem_id: str, request: Request):
     # expected output, so there's nothing to warm for those.
     approved = problems_module.get_problem(problem_id)
     if approved.get("track", "sql") == "sql":
-        cols, rows, _ = sandbox.compute_expected_output(approved)
-        _EXPECTED_CACHE[problem_id] = (cols, rows)
+        _EXPECTED_CACHE[problem_id] = _compute_expected_cache_entry(approved)
 
     # Compute real sample I/O before auditing (not after) -- otherwise
     # every fresh approval's audit would spuriously flag "no example yet"

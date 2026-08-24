@@ -228,6 +228,25 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_auto_renew BOOLEAN NOT NULL DEFAULT TRUE
             """)
+            # Additional, hidden, adversarially-constructed seed datasets for
+            # SQL problems -- problems.seed_sql stays test case #1 (the one
+            # shown to students); each row here is one more dataset a
+            # student's query must also pass on Submit. A problem with zero
+            # rows here grades exactly as before this table existed, so the
+            # backfill across the existing bank can proceed incrementally.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS problem_test_cases (
+                    id SERIAL PRIMARY KEY,
+                    problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+                    seed_sql TEXT NOT NULL,
+                    defeats_wrong_query TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_problem_test_cases_problem_id
+                    ON problem_test_cases (problem_id)
+            """)
 
 
 def dict_cursor(conn):

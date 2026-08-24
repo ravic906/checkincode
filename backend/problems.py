@@ -45,6 +45,15 @@ import llm
 # style near-misses that a plain string-equality check would let through.
 DUPLICATE_TITLE_THRESHOLD = 0.82
 
+# Hidden, adversarially-constructed seed datasets per SQL problem, on top
+# of the one primary/visible seed_sql -- mirrors the Python track's own
+# "4-6 assertions" bar in PROBLEM_BATCH_SYSTEM_PROMPT rather than an
+# arbitrary new number. A draft that validates fewer than the minimum
+# gets rejected outright rather than accepted with weaker coverage than
+# intended -- see insert_pending_draft's SQL branch.
+SQL_HIDDEN_TEST_CASE_COUNT = 4
+SQL_MIN_HIDDEN_TEST_CASES = 2
+
 PROBLEMS = [
     {
         "id": "easy-1-filter-active-employees",
@@ -2392,6 +2401,40 @@ def merge_topics(old_topics: list[str], new_topic: str) -> int:
             return cur.rowcount
 
 
+def get_test_case_seeds(problem_id: str) -> list[str]:
+    """The problem's hidden, adversarially-constructed seed datasets --
+    NOT including problems.seed_sql itself (the primary/visible dataset),
+    which callers already have from get_problem(). Empty for a problem
+    that hasn't been backfilled yet, which is the correct/expected state
+    for incremental rollout, not an error."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT seed_sql FROM problem_test_cases WHERE problem_id = %s ORDER BY id",
+                (problem_id,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+
+def add_test_case_seed(problem_id: str, seed_sql: str, defeats_wrong_query: str | None = None) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO problem_test_cases (problem_id, seed_sql, defeats_wrong_query) VALUES (%s, %s, %s)",
+                (problem_id, seed_sql, defeats_wrong_query),
+            )
+
+
+def clear_test_case_seeds(problem_id: str) -> int:
+    """Used before re-backfilling a problem (e.g. after a manual seed_sql
+    edit invalidated the old hidden datasets) so re-running the backfill
+    doesn't just pile up duplicates alongside stale ones."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM problem_test_cases WHERE problem_id = %s", (problem_id,))
+            return cur.rowcount
+
+
 def set_problem_description(problem_id: str, description: str) -> None:
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -2907,9 +2950,13 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
             raise InvalidDraftProblem(f"Rubric self-consistency check failed to run: {e}")
         if not ok:
             raise InvalidDraftProblem(f"sample_strong_answer doesn't clearly hit its own rubric_points: {reason}")
-    else:
+    discriminating_cases: list[dict] = []
+    if track == "sql":
         try:
             sandbox.validate_student_sql(draft["canonical_sql"])
+            sandbox.validate_query_references_real_table(
+                draft["canonical_sql"], sandbox._extract_schema_table_names(draft["schema_sql"]),
+            )
         except sandbox.SqlValidationError as e:
             raise InvalidDraftProblem(f"canonical_sql failed read-only validation: {e}")
 
@@ -2923,6 +2970,27 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
             })
         except Exception as e:
             raise InvalidDraftProblem(f"canonical_sql failed to execute: {e}")
+
+        # A single fixed dataset can't tell a genuinely correct query from
+        # one that's wrong but coincidentally produces the same rows on
+        # that one dataset -- see llm.generate_discriminating_test_cases.
+        # Require at least SQL_MIN_HIDDEN_TEST_CASES of the requested
+        # SQL_HIDDEN_TEST_CASE_COUNT to validate before accepting the draft
+        # at all, same "raise, don't partially accept" convention as every
+        # other check in this function.
+        try:
+            gen_result = llm.generate_discriminating_test_cases(
+                user_id="admin", problem=draft, count=SQL_HIDDEN_TEST_CASE_COUNT,
+            )
+        except Exception as e:
+            raise InvalidDraftProblem(f"Discriminating test-case generation failed to run: {e}")
+        discriminating_cases = gen_result["validated"]
+        if len(discriminating_cases) < SQL_MIN_HIDDEN_TEST_CASES:
+            raise InvalidDraftProblem(
+                f"Only {len(discriminating_cases)}/{SQL_HIDDEN_TEST_CASE_COUNT} "
+                "discriminating test cases validated -- seed data for this "
+                "problem doesn't reliably rule out wrong-but-plausible logic."
+            )
 
     problem_id = f"generated-{uuid.uuid4().hex[:8]}"
     description = draft.get("description") or draft.get("case_prompt", "")
@@ -2950,6 +3018,11 @@ def insert_pending_draft(draft: dict, track: str = "sql") -> str:
                     draft.get("sample_strong_answer"),
                 ),
             )
+            for case in discriminating_cases:
+                cur.execute(
+                    "INSERT INTO problem_test_cases (problem_id, seed_sql, defeats_wrong_query) VALUES (%s, %s, %s)",
+                    (problem_id, case["seed_sql"], case["defeats_wrong_query"]),
+                )
     return problem_id
 
 

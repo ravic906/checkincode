@@ -19,6 +19,8 @@ from pathlib import Path
 
 import requests
 
+import sandbox
+
 import topics
 
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
@@ -789,6 +791,139 @@ def audit_problem_quality(
     except (json.JSONDecodeError, KeyError):
         verdict = {"overall_verdict": "needs_fix", "notes": f"Judge reply did not parse as JSON: {result['reply'][:500]}"}
     return {"verdict": verdict, "usage": result["usage"]}
+
+
+DISCRIMINATING_TEST_CASE_SYSTEM_PROMPT = (
+    "You harden SQL interview-practice problems against a specific grading "
+    "weakness: a query with fundamentally wrong logic can coincidentally "
+    "produce the right rows on a single fixed dataset, and get graded "
+    "correct even though it doesn't actually solve the problem in general.\n\n"
+    "Given a problem's schema_sql, canonical_sql (the real correct "
+    "solution), and description, your job is to identify plausible wrong "
+    "approaches a candidate might take for THIS specific problem, drawn "
+    "from real interview gotchas: a NOT IN list that silently returns zero "
+    "rows because it contains a NULL, a JOIN that quietly duplicates rows "
+    "before an aggregate runs over them, COUNT(column) vs COUNT(*) "
+    "disagreeing because of NULLs, integer division truncating when a "
+    "decimal was expected, a LEFT JOIN condition placed in WHERE instead of "
+    "ON silently turning it into an INNER JOIN, GROUP BY with a wrong or "
+    "missing column, a missing filter, the wrong aggregate function, an "
+    "off-by-one date/rank boundary, or a similarly plausible mistake for "
+    "this problem's specific logic.\n\n"
+    "For each wrong approach, produce TWO things: (1) `seed_sql` -- a "
+    "dataset (INSERT statements only, matching the given schema_sql "
+    "exactly) specifically constructed so that the wrong approach and the "
+    "real canonical_sql produce DIFFERENT results on it, while "
+    "canonical_sql still produces a sensible, correct answer; (2) "
+    "`wrong_query` -- the actual incorrect SQL a candidate making that "
+    "mistake would write (one valid SELECT/WITH statement, syntactically "
+    "correct DuckDB SQL, just logically wrong in the intended way).\n\n"
+    "Every seed_sql must be substantively different data from every other "
+    "one you produce, not just a relabeling -- vary row counts, which rows "
+    "have NULLs, which values are duplicated, and boundary values, so each "
+    "dataset is targeted at unmasking its own specific wrong approach.\n\n"
+    "Respond with ONLY a JSON object, no other text, no markdown code "
+    'fences: {"test_cases": [{"targets": "one-line description of the '
+    'wrong approach", "seed_sql": "...", "wrong_query": "..."}, ...]}'
+)
+
+
+def generate_discriminating_test_cases(*, user_id: str, problem: dict, count: int) -> dict:
+    """
+    Produces up to `count` additional hidden seed datasets for a SQL
+    problem, each adversarially constructed (by the LLM) and then
+    self-validated (in-process, via sandbox.py -- no extra LLM call) to
+    actually distinguish the real canonical_sql from a specific plausible
+    wrong query. This is the SQL-track answer to "only one logic should
+    solve them all": a wrong-but-plausible student query would have to
+    coincidentally agree with canonical_sql on every one of these
+    purpose-built datasets, not just one arbitrary fixed dataset.
+
+    Validation, per candidate: run canonical_sql and wrong_query against
+    {schema_sql, seed_sql} (the same in-process DuckDB path every real
+    submission uses -- sandbox._execute). Accept only if canonical_sql
+    executes cleanly and wrong_query's output differs from it under the
+    same value-only diff (sandbox.compare_results) a real submission would
+    get. Retries each rejected slot up to 2 times before giving up on it --
+    a slot that never validates is simply omitted from the result rather
+    than accepted with a dataset that doesn't do its job.
+
+    Returns {"validated": [{"seed_sql": str, "defeats_wrong_query": str}, ...],
+    "requested": count, "usage": {...}} -- `usage` is the token usage from
+    the single LLM call that produced (and, on retries, re-produced) the
+    candidates; callers decide what to do if len(validated) < requested
+    (flag the problem for manual review rather than silently accepting
+    weaker coverage than intended).
+    """
+    order_matters = problem.get("order_matters", False)
+    user_prompt = (
+        f"schema_sql:\n{problem['schema_sql']}\n\n"
+        f"canonical_sql:\n{problem['canonical_sql']}\n\n"
+        f"description:\n{problem.get('description', '')}\n\n"
+        f"Produce exactly {count} (targets, seed_sql, wrong_query) triples."
+    )
+    messages = [
+        {"role": "system", "content": DISCRIMINATING_TEST_CASE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    validated: list[dict] = []
+    seen: set[tuple[str, str]] = set()  # (normalized seed_sql, wrong_query) already accepted
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "estimated_cost_usd": 0.0}
+    remaining = count
+    attempts = 0
+    while remaining > 0 and attempts < 3:
+        attempts += 1
+        try:
+            result = _call_chat_with_retry(
+                user_id=user_id, problem_id=f"discriminating-test-cases-{problem.get('id', 'draft')}",
+                messages=messages, max_tokens=min(6000, max(1200, remaining * 700)),
+                json_mode=True, temperature=0.8,
+            )
+            for k in total_usage:
+                total_usage[k] += result["usage"].get(k, 0)
+            candidates = _parse_json_reply(result["reply"]).get("test_cases", [])
+        except Exception:
+            break
+
+        for c in candidates:
+            if len(validated) >= count:
+                break
+            seed_sql = c.get("seed_sql")
+            wrong_query = c.get("wrong_query")
+            if not seed_sql or not wrong_query:
+                continue
+            # A retry re-sends the same prompt to fill the remaining slots
+            # -- without this, a model that returns a near-identical
+            # candidate on retry would pad `validated` with a duplicate
+            # that adds zero real discriminative value instead of a
+            # genuinely new dataset.
+            dedup_key = (" ".join(seed_sql.split()).lower(), " ".join(wrong_query.split()).lower())
+            if dedup_key in seen:
+                continue
+            case_problem = {"schema_sql": problem["schema_sql"], "seed_sql": seed_sql}
+            try:
+                expected_columns, expected_rows, _ = sandbox._execute(case_problem, problem["canonical_sql"])
+            except Exception:
+                continue  # canonical_sql itself failed on this dataset -- reject it
+            try:
+                wrong_columns, wrong_rows, _ = sandbox._execute(case_problem, wrong_query)
+            except Exception:
+                # The wrong query failing to execute at all is still a valid
+                # "differs from expected" signal -- accept the dataset.
+                validated.append({"seed_sql": seed_sql, "defeats_wrong_query": wrong_query})
+                seen.add(dedup_key)
+                continue
+            is_correct, _diff = sandbox.compare_results(
+                expected_columns, expected_rows, wrong_columns, wrong_rows, order_matters,
+            )
+            if not is_correct:
+                validated.append({"seed_sql": seed_sql, "defeats_wrong_query": wrong_query})
+                seen.add(dedup_key)
+
+        remaining = count - len(validated)
+
+    return {"validated": validated[:count], "requested": count, "usage": total_usage}
 
 
 def interview_turn(
