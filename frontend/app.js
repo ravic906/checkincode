@@ -389,17 +389,25 @@ function renderExamples(p) {
   if (p.track === "python") {
     if (!Array.isArray(ex) || ex.length === 0) return "";
     const rows = ex.map(e => {
-      const call = e.method
-        ? `.${escapeHtml(e.method)}(${(e.args || []).map(escapeHtml).join(", ")})`
-        : `${escapeHtml(p.function_signature || "")}(${(e.args || []).map(escapeHtml).join(", ")})`;
-      // Two separate labeled blocks rather than one inline "call → result"
-      // row -- a multi-line result (e.g. a pandas DataFrame repr) reads as
-      // garbled crammed after an arrow on the same line.
+      const args = e.args || [];
+      const hasMultilineArg = args.some(a => String(a).includes("\n"));
+      // A multi-line arg (e.g. a pandas DataFrame repr) can't be dropped
+      // inside `fn(...)` call syntax without looking like mangled code --
+      // render it as its own plain block instead of pretending it's a
+      // single-line call expression.
+      const inputHtml = hasMultilineArg
+        ? args.map(a => `<pre class="example-call">${escapeHtml(a)}</pre>`).join("")
+        : (() => {
+            const call = e.method
+              ? `.${escapeHtml(e.method)}(${args.map(escapeHtml).join(", ")})`
+              : `${escapeHtml(p.function_signature || "")}(${args.map(escapeHtml).join(", ")})`;
+            return `<pre class="example-call">${call}</pre>`;
+          })();
       return `
         <div class="example-item">
           <div class="example-io">
             <div class="example-label">Input</div>
-            <pre class="example-call">${call}</pre>
+            ${inputHtml}
           </div>
           <div class="example-io">
             <div class="example-label">Output</div>

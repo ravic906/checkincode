@@ -262,15 +262,15 @@ body {
 }
 
 .example-block { margin-bottom: 0; }
-.example-item { padding: 8px 0; }
-.example-item + .example-item { border-top: 1px solid var(--border); margin-top: 8px; }
-.example-io + .example-io { margin-top: 8px; }
+.example-item { padding: 4px 0; }
+.example-item + .example-item { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; }
+.example-io + .example-io { margin-top: 10px; }
 .example-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 .example-call, .example-result {
   margin: 0;
