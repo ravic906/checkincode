@@ -387,7 +387,7 @@ function renderTable(name, table) {
   `).join("");
   return `
     <div class="sample-table-wrap">
-      <h4>${name}</h4>
+      ${name ? `<h4>${name}</h4>` : ""}
       <table class="data-table">
         <thead><tr>${table.columns.map(c => `<th>${c}</th>`).join("")}</tr></thead>
         <tbody>${rows}</tbody>
@@ -436,6 +436,20 @@ function priceWithLocalEstimate(inrAmount, period = "mo") {
 // backend/pysandbox.extract_examples (Python) or the cached canonical_sql
 // result (SQL) -- see problems.examples. Empty/missing examples render
 // nothing rather than an empty section.
+// A captured Python example value is either a plain repr string, or --
+// for a DataFrame-shaped arg/result -- a structured {_table, columns,
+// rows} object (see pysandbox.py's _phoenix_capture_value). Rendering the
+// latter as a real HTML table, instead of dumping its repr into a <pre>
+// block, is what actually made SQL's sample output readable; Python's
+// tabular values get the same treatment here rather than a second-class
+// text rendering just because the value came from a different track.
+function renderExampleValue(v) {
+  if (v && typeof v === "object" && v._table) {
+    return renderTable("", v);
+  }
+  return `<pre class="example-call">${escapeHtml(v)}</pre>`;
+}
+
 function renderExamples(p) {
   const ex = p.examples;
   if (!ex) return "";
@@ -443,13 +457,12 @@ function renderExamples(p) {
     if (!Array.isArray(ex) || ex.length === 0) return "";
     const rows = ex.map(e => {
       const args = e.args || [];
-      const hasMultilineArg = args.some(a => String(a).includes("\n"));
-      // A multi-line arg (e.g. a pandas DataFrame repr) can't be dropped
-      // inside `fn(...)` call syntax without looking like mangled code --
-      // render it as its own plain block instead of pretending it's a
-      // single-line call expression.
-      const inputHtml = hasMultilineArg
-        ? args.map(a => `<pre class="example-call">${escapeHtml(a)}</pre>`).join("")
+      // A multi-line or tabular arg can't be dropped inside `fn(...)`
+      // call syntax without looking like mangled code -- render it as
+      // its own block instead of pretending it's a single-line call.
+      const hasComplexArg = args.some(a => typeof a === "object" || String(a).includes("\n"));
+      const inputHtml = hasComplexArg
+        ? args.map(renderExampleValue).join("")
         : (() => {
             const call = e.method
               ? `.${escapeHtml(e.method)}(${args.map(escapeHtml).join(", ")})`
@@ -464,7 +477,7 @@ function renderExamples(p) {
           </div>
           <div class="example-io">
             <div class="example-label">Output</div>
-            <pre class="example-result">${escapeHtml(e.result)}</pre>
+            ${renderExampleValue(e.result)}
           </div>
         </div>
       `;
@@ -479,8 +492,8 @@ function renderExamples(p) {
   if (!ex.columns || !ex.rows || ex.rows.length === 0) return "";
   return `
     <div class="tables-section">
-      <h3>Expected Output (sample)</h3>
-      ${renderTable("Query result", ex)}
+      <h3>Sample Output</h3>
+      ${renderTable("", ex)}
     </div>
   `;
 }

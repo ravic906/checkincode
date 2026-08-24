@@ -158,11 +158,33 @@ def _phoenix_safe_repr(v):
         if isinstance(v, (list, tuple, set)):
             opener, closer = {{"list": ("[", "]"), "tuple": ("(", ")"), "set": ("{{", "}}")}}[type(v).__name__]
             return opener + ", ".join(_phoenix_safe_repr(x) for x in v) + closer
+        # date/datetime/pandas.Timestamp all support isoformat() -- repr()
+        # on these prints Python constructor syntax (Timestamp('2023-01-01
+        # 00:00:00')), which reads like leaked code, not data. Table cells
+        # in particular should look like the plain values SQL's own
+        # examples already show, not Python's internal representation.
+        if hasattr(v, "isoformat") and not isinstance(v, str):
+            return str(v.isoformat())
         if hasattr(v, "__dict__") and type(v).__repr__ is object.__repr__:
             return type(v).__name__ + repr(vars(v))
         return repr(v)
     except Exception:
         return repr(v)
+
+def _phoenix_capture_value(v):
+    # A DataFrame-shaped value (2-D, has .columns) renders as a real table
+    # client-side instead of a repr string dumped into a <pre> block --
+    # detected structurally so this works without a hard pandas import
+    # here. Cells go through _phoenix_safe_repr too, so a cell that's
+    # itself a NaN/Timestamp/etc. still stringifies safely.
+    try:
+        if hasattr(v, "columns") and hasattr(v, "shape") and len(v.shape) == 2:
+            cols = [str(c) for c in v.columns]
+            rows = [[_phoenix_safe_repr(cell) for cell in row] for row in v.astype(object).values.tolist()]
+            return {{"_table": True, "columns": cols, "rows": rows}}
+    except Exception:
+        pass
+    return _phoenix_safe_repr(v)
 
 def _phoenix_capture_result(result):
     # Peeking into a generator to describe it must not consume the actual
@@ -172,7 +194,7 @@ def _phoenix_capture_result(result):
     if _phoenix_inspect.isgenerator(result):
         _peek, _real = _phoenix_itertools.tee(result)
         return "yields: " + repr([_phoenix_safe_repr(x) for x in _phoenix_itertools.islice(_peek, 5)]), _real
-    return _phoenix_safe_repr(result), result
+    return _phoenix_capture_value(result), result
 
 if _phoenix_inspect.isclass(_phoenix_target):
     def _phoenix_wrap_method(_orig_method):
@@ -182,7 +204,7 @@ if _phoenix_inspect.isclass(_phoenix_target):
             if len(_phoenix_examples) < {max_examples}:
                 _phoenix_examples.append({{
                     "method": _orig_method.__name__,
-                    "args": [_phoenix_safe_repr(a) for a in args],
+                    "args": [_phoenix_capture_value(a) for a in args],
                     "result": _phoenix_result_repr,
                 }})
             return _phoenix_result
@@ -199,7 +221,7 @@ else:
         _phoenix_result = _phoenix_target(*args, **kwargs)
         _phoenix_result_repr, _phoenix_result = _phoenix_capture_result(_phoenix_result)
         if len(_phoenix_examples) < {max_examples}:
-            _phoenix_examples.append({{"args": [_phoenix_safe_repr(a) for a in args], "result": _phoenix_result_repr}})
+            _phoenix_examples.append({{"args": [_phoenix_capture_value(a) for a in args], "result": _phoenix_result_repr}})
         return _phoenix_result
 
     {function_signature} = _phoenix_tracer
