@@ -392,7 +392,21 @@ function renderExamples(p) {
       const call = e.method
         ? `.${escapeHtml(e.method)}(${(e.args || []).map(escapeHtml).join(", ")})`
         : `${escapeHtml(p.function_signature || "")}(${(e.args || []).map(escapeHtml).join(", ")})`;
-      return `<div class="example-row"><span class="example-call">${call}</span><span class="example-arrow">→</span><span class="example-result">${escapeHtml(e.result)}</span></div>`;
+      // Two separate labeled blocks rather than one inline "call → result"
+      // row -- a multi-line result (e.g. a pandas DataFrame repr) reads as
+      // garbled crammed after an arrow on the same line.
+      return `
+        <div class="example-item">
+          <div class="example-io">
+            <div class="example-label">Input</div>
+            <pre class="example-call">${call}</pre>
+          </div>
+          <div class="example-io">
+            <div class="example-label">Output</div>
+            <pre class="example-result">${escapeHtml(e.result)}</pre>
+          </div>
+        </div>
+      `;
     }).join("");
     return `
       <div class="tables-section">

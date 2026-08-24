@@ -19,11 +19,6 @@ libraries pre-installed by default.
 """
 
 DATA_LIBRARY_TOPICS = [
-    "NumPy Array Creation & Indexing",
-    "NumPy Broadcasting & Vectorization",
-    "NumPy Aggregations & Boolean Masking",
-    "Pandas Data Cleaning & Missing Data",
-    "Pandas Merging, Joining & Reshaping",
-    "Pandas GroupBy & Aggregation",
-    "Pandas Time Series Operations",
+    "NumPy",
+    "Pandas",
 ]

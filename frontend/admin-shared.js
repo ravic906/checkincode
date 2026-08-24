@@ -43,17 +43,8 @@ function escapeHtml(s) {
 // track='python', not their own track -- mirrors problems.py's
 // _category_bucket()). ---
 
-const PANDAS_TOPICS = new Set([
-  "Pandas Data Cleaning & Missing Data",
-  "Pandas Merging, Joining & Reshaping",
-  "Pandas GroupBy & Aggregation",
-  "Pandas Time Series Operations",
-]);
-const NUMPY_TOPICS = new Set([
-  "NumPy Array Creation & Indexing",
-  "NumPy Broadcasting & Vectorization",
-  "NumPy Aggregations & Boolean Masking",
-]);
+const PANDAS_TOPICS = new Set(["Pandas"]);
+const NUMPY_TOPICS = new Set(["NumPy"]);
 const STATS_TOPICS = new Set([
   "Descriptive Statistics",
   "Probability Fundamentals",

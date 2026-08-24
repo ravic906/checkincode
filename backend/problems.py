@@ -2378,6 +2378,20 @@ def set_problem_topic(problem_id: str, topic: str) -> None:
             cur.execute("UPDATE problems SET topic = %s WHERE id = %s", (topic, problem_id))
 
 
+def merge_topics(old_topics: list[str], new_topic: str) -> int:
+    """Bulk-relabels every problem currently on any of `old_topics` to
+    `new_topic` in one statement -- for collapsing a taxonomy's overly
+    granular subtopics (e.g. the several NumPy/Pandas chapter-level
+    topics) into one coarser label. Returns the number of rows changed."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE problems SET topic = %s WHERE topic = ANY(%s)",
+                (new_topic, old_topics),
+            )
+            return cur.rowcount
+
+
 def set_problem_description(problem_id: str, description: str) -> None:
     with db.get_conn() as conn:
         with conn.cursor() as cur:

@@ -262,10 +262,23 @@ body {
 }
 
 .example-block { margin-bottom: 0; }
-.example-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
-.example-row + .example-row { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 8px; }
+.example-item { padding: 8px 0; }
+.example-item + .example-item { border-top: 1px solid var(--border); margin-top: 8px; }
+.example-io + .example-io { margin-top: 8px; }
+.example-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.example-call, .example-result {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
 .example-call { color: #a5d6ff; }
-.example-arrow { color: var(--muted); }
 .example-result { color: #7ee787; }
 
 .sample-table-wrap { margin-bottom: 16px; overflow-x: auto; }

@@ -1259,6 +1259,25 @@ def api_admin_set_topic(problem_id: str, req: SetTopicRequest, request: Request)
     return {"id": problem_id, "topic": req.topic}
 
 
+class MergeTopicsRequest(BaseModel):
+    old_topics: list[str]
+    new_topic: str
+
+
+@app.post("/api/admin/problems/merge-topics")
+def api_admin_merge_topics(req: MergeTopicsRequest, request: Request):
+    """One-off bulk relabel: every problem currently on any of
+    `old_topics` moves to `new_topic` in a single statement -- for
+    collapsing an overly granular taxonomy (e.g. several NumPy/Pandas
+    chapter-level topics) into one coarser label, without touching each
+    problem individually via set-topic."""
+    _require_admin(request)
+    if not req.old_topics:
+        raise HTTPException(400, "old_topics must be a non-empty list.")
+    changed = problems_module.merge_topics(req.old_topics, req.new_topic)
+    return {"old_topics": req.old_topics, "new_topic": req.new_topic, "changed": changed}
+
+
 class SetDescriptionRequest(BaseModel):
     description: str
 
