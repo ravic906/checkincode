@@ -26,10 +26,13 @@
           <path d="M 11.2 6 C 10.3 8, 10.1 10.5, 11 13 C 8.5 15, 6.5 18, 5.5 22 C 8 20.3, 10 18, 11.2 15.3 C 11.7 17.5, 12.3 19.7, 13.5 21.5 C 14 19, 13.7 16.5, 12.6 14.3 C 14.3 17, 16.3 19.4, 18.5 21 C 17.7 18, 15.8 15.2, 13 13 C 13.7 10.5, 13.6 8, 12.8 6 Z"/>
         </svg>
       </span>
-      <span class="brand-wordmark">Phoenix<span class="brand-accent">Prep</span></span>
+      <span class="brand-wordmark">Phoenix<span class="brand-accent">Prep</span><span class="brand-pro" id="brandPro" hidden>PRO</span></span>
     </div>
     <div class="topbar-right">
-      <div class="tier-badge" id="tierBadge">loading…</div>
+      <div class="account-menu" id="accountMenu">
+        <button class="account-menu-toggle" id="accountMenuToggle">loading…</button>
+        <div class="account-menu-panel" id="accountMenuPanel" hidden></div>
+      </div>
       <a class="admin-nav-link" id="adminNavLink" href="admin.html" style="display:none;">Admin</a>
       <button class="reset-progress-btn" id="resetProgressBtn" title="Reset solved-problem progress">Reset Progress</button>
       <div id="authSection" class="auth-section"></div>

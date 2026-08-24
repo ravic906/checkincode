@@ -192,19 +192,42 @@ async function doCancelSubscription(hasExpiry) {
   }
 }
 
+// Wired once: clicking the compact account-menu toggle opens/closes the
+// panel; clicking outside it, or pressing Escape, closes it. Mirrors the
+// same dismissible-panel pattern openAskPhoenix()/closeAskPhoenix() use.
+let _accountMenuWired = false;
+function wireAccountMenuToggle() {
+  if (_accountMenuWired) return;
+  _accountMenuWired = true;
+  const toggle = document.getElementById("accountMenuToggle");
+  const panel = document.getElementById("accountMenuPanel");
+  toggle.onclick = () => { panel.hidden = !panel.hidden; };
+  document.addEventListener("click", (e) => {
+    if (!panel.hidden && !e.target.closest("#accountMenu")) panel.hidden = true;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !panel.hidden) panel.hidden = true;
+  });
+}
+
 async function refreshTierBadge() {
   const usage = await api("/api/usage");
   currentTier = usage.tier;
-  const badge = document.getElementById("tierBadge");
-  badge.classList.toggle("paid", usage.tier === "paid");
-  if (usage.tier === "paid") {
+  const toggle = document.getElementById("accountMenuToggle");
+  const panel = document.getElementById("accountMenuPanel");
+  const isPaid = usage.tier === "paid";
+  toggle.classList.toggle("paid", isPaid);
+  document.getElementById("brandPro").hidden = !isPaid;
+
+  if (isPaid) {
     const until = usage.pro_expires_at ? formatProUntil(usage.pro_expires_at) : null;
+    toggle.textContent = until ? `Pro · ${until}` : "Pro";
     if (usage.pro_auto_renew === false && until) {
-      badge.innerHTML = `Pro — cancelled, access until ${until}`;
+      panel.innerHTML = `Pro — cancelled, access until ${until}`;
     } else if (until) {
-      badge.innerHTML = `Pro until ${until} <button id="cancelSubBtn">Cancel</button>`;
+      panel.innerHTML = `Pro until ${until}<button class="cancel-btn" id="cancelSubBtn">Cancel</button>`;
     } else {
-      badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix <button id="cancelSubBtn">Cancel</button>`;
+      panel.innerHTML = `Pro — full problem library, unlimited Ask Phoenix<button class="cancel-btn" id="cancelSubBtn">Cancel</button>`;
     }
     const cancelBtn = document.getElementById("cancelSubBtn");
     if (cancelBtn) cancelBtn.onclick = () => doCancelSubscription(!!until);
@@ -215,9 +238,11 @@ async function refreshTierBadge() {
     // looks generous on its own ("0/20 submissions" reads like broad
     // access). Deliberately no exact counts here (bank size and
     // free-tier fraction aren't things we want to publish in the UI).
-    badge.innerHTML = `Free — limited problem access ${planButtonsHtml("upgrade")}`;
+    toggle.textContent = "Free";
+    panel.innerHTML = `<div class="plan-buttons">${planButtonsHtml("upgrade")}</div>`;
     wirePlanButtons("upgrade");
   }
+  wireAccountMenuToggle();
   document.getElementById("adminNavLink").style.display = usage.is_admin ? "inline-flex" : "none";
   return usage;
 }
@@ -669,11 +694,11 @@ function showUpsell() {
   updateAskPhoenixFabVisibility();
   document.getElementById("workspace").innerHTML = `
     <div class="empty-state upsell-box">
-      This problem is part of Pro. Upgrade to ${priceWithLocalEstimate(199)} to unlock every practice problem.
-      <br/><button id="inlineUpgradeBtn">Upgrade now</button>
+      This problem is part of Pro. Upgrade to unlock every practice problem.
+      <br/>${planButtonsHtml("inlineUpgrade")}
     </div>
   `;
-  document.getElementById("inlineUpgradeBtn").onclick = () => doUpgrade("monthly");
+  wirePlanButtons("inlineUpgrade");
 }
 
 async function loadProblem(id) {
@@ -934,10 +959,10 @@ async function runQuery(isSubmit) {
       resultsSection.innerHTML = `<div class="result-banner fail">⚠️ ${escapeHtml(e.message)}</div>`;
     } else if (e.status === 402) {
       resultsSection.innerHTML = `<div class="upsell-box">
-        This problem is part of Pro. Upgrade to ${priceWithLocalEstimate(199)} to unlock every practice problem.
-        <br/><button id="inlineUpgradeBtn">Upgrade now</button>
+        This problem is part of Pro. Upgrade to unlock every practice problem.
+        <br/>${planButtonsHtml("inlineUpgrade")}
       </div>`;
-      document.getElementById("inlineUpgradeBtn").onclick = () => doUpgrade("monthly");
+      wirePlanButtons("inlineUpgrade");
     } else {
       resultsSection.innerHTML = `<div class="result-banner fail">Error: ${escapeHtml(e.message)}</div>`;
     }
@@ -974,8 +999,7 @@ function renderResult(result, isPartialCheck = false) {
   }
 
   resultsSection.innerHTML = html;
-  const upBtn = document.getElementById("inlineUpgradeBtn");
-  if (upBtn) upBtn.onclick = () => doUpgrade("monthly");
+  wirePlanButtons("inlineUpgrade");
 }
 
 function renderPythonResult(result) {
@@ -993,8 +1017,7 @@ function renderPythonResult(result) {
   }
 
   resultsSection.innerHTML = html;
-  const upBtn = document.getElementById("inlineUpgradeBtn");
-  if (upBtn) upBtn.onclick = () => doUpgrade("monthly");
+  wirePlanButtons("inlineUpgrade");
 }
 
 // -------- Ask Phoenix: open-ended contextual help, any time a problem is loaded --------
@@ -1018,11 +1041,10 @@ function renderAskPhoenixBody() {
     body.innerHTML = `
       <div class="upsell-box">
         Ask Phoenix is a Pro feature -- get contextual AI help on any problem, any time, not just after a wrong answer.
-        Upgrade to ${priceWithLocalEstimate(199)} to unlock it.
-        <br/><button id="askPhoenixUpgradeBtn">Upgrade now</button>
+        <br/>${planButtonsHtml("askPhoenixUpgrade")}
       </div>
     `;
-    document.getElementById("askPhoenixUpgradeBtn").onclick = () => doUpgrade("monthly");
+    wirePlanButtons("askPhoenixUpgrade");
     return;
   }
 

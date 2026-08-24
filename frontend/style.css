@@ -81,6 +81,76 @@ body {
   cursor: default;
 }
 .tier-badge.paid { color: #0f1115; background: linear-gradient(90deg,#f6d365,#fda085); border: none; font-weight: 600; }
+
+/* Embossed "PRO" wordmark badge -- a small gradient-filled pill with an
+   inset highlight/shadow, not gradient text: background-clip:text plus an
+   emboss text-shadow reads muddy at this size, a pill reads as pressed
+   metal reliably. Same gold as .tier-badge.paid so "premium" is one
+   consistent material across the UI, not two different golds. */
+.brand-pro {
+  margin-left: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 5px;
+  vertical-align: middle;
+  background: linear-gradient(160deg, #f6d365, #fda085);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.55),
+    inset 0 -1px 2px rgba(0,0,0,0.25),
+    0 1px 2px rgba(0,0,0,0.35);
+  color: #3a2410;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.35);
+}
+
+/* Account menu -- the tier badge is now a compact toggle that opens a
+   dropdown panel holding the same upgrade/status/cancel content that
+   used to sit directly in the header. */
+.account-menu { position: relative; }
+.account-menu-toggle {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+}
+.account-menu-toggle.paid { color: #0f1115; background: linear-gradient(90deg,#f6d365,#fda085); border: none; font-weight: 600; }
+.account-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 240px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 12px 28px -12px rgba(0,0,0,0.55);
+  z-index: 20;
+  font-size: 13px;
+}
+.account-menu-panel .plan-buttons { display: flex; flex-direction: column; gap: 8px; }
+.account-menu-panel button {
+  font-size: 12px;
+  background: linear-gradient(90deg,#f6d365,#fda085);
+  border: none;
+  color: #0f1115;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+}
+.account-menu-panel .cancel-btn {
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 500;
+}
 .tier-badge button {
   margin-left: 8px;
   font-size: 11px;
