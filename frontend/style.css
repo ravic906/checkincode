@@ -93,20 +93,36 @@ body {
   text-shadow: 0 1px 0 rgba(255,255,255,0.35);
 }
 
-/* Subscription settings page -- rendered inside Clerk's own "Manage
-   account" modal as a custom page (see auth.js's customPages wiring), so
-   it needs to hold its own light-mode palette rather than this site's
-   dark --panel/--border tokens: Clerk's default theme is light and these
-   tokens would render a dark box floating inside it. */
-.subscription-settings-page { color: #1f2430; font-size: 14px; }
-.subscription-settings-page h2 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 14px;
-  color: #1f2430;
+/* Subscription modal -- opened from a customMenuItems link in Clerk's
+   account popover (see auth.js), rendered in our own overlay rather than
+   nested inside Clerk's UI, so it uses this site's own dark theme tokens
+   like every other panel (.ask-phoenix-panel etc.), not Clerk's palette. */
+.subscription-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.subscription-settings-page .subscription-status { margin: 0 0 14px; color: #4b5468; }
-.subscription-settings-page .plan-buttons { display: flex; flex-direction: column; gap: 8px; max-width: 260px; }
+.subscription-panel {
+  width: 360px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 48px -16px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.subscription-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.subscription-settings-page { color: var(--text); font-size: 14px; }
+.subscription-settings-page h2 { display: none; } /* the panel header already reads "Subscription" */
+.subscription-settings-page .subscription-status { margin: 0 0 14px; color: var(--muted); }
+.subscription-settings-page .plan-buttons { display: flex; flex-direction: column; gap: 8px; }
 .subscription-settings-page .plan-buttons button {
   font-size: 13px;
   background: linear-gradient(90deg,#f6d365,#fda085);
@@ -119,8 +135,8 @@ body {
 }
 .subscription-settings-page .cancel-btn {
   background: none;
-  border: 1px solid #d7dbe3;
-  color: #4b5468;
+  border: 1px solid var(--border);
+  color: var(--muted);
   font-weight: 500;
   padding: 8px 14px;
   border-radius: 6px;

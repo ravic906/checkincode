@@ -192,15 +192,24 @@ async function doCancelSubscription(hasExpiry) {
   }
 }
 
-// Subscription management lives inside Clerk's own "Manage account" modal
-// now (see auth.js's customPages wiring) rather than a separate header
-// dropdown -- a paid account is always a signed-in Clerk account (doUpgrade
-// forces sign-in first), so Clerk's own account settings is a reasonable,
-// single home for it instead of a bespoke menu next to it.
-//
-// renderSubscriptionSettingsPage(el) is called by Clerk each time the
-// custom "Subscription" page mounts, so it fetches its own fresh usage
-// snapshot rather than relying on state cached elsewhere.
+// Subscription management lives in its own small modal, opened via a
+// customMenuItems entry in Clerk's account popover (see auth.js) --
+// customMenuItems is a plain onClick link Clerk reliably supports,
+// unlike nesting a full custom page inside Clerk's own "Manage account"
+// profile modal, which this app's non-standard Clerk loading setup
+// (worked around a Monaco AMD collision -- see auth.js's header comment)
+// turned out not to actually render in practice.
+function openSubscriptionModal() {
+  document.getElementById("subscriptionOverlay").style.display = "flex";
+  renderSubscriptionSettingsPage(document.getElementById("subscriptionBody"));
+}
+function closeSubscriptionModal() {
+  const overlay = document.getElementById("subscriptionOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+// renderSubscriptionSettingsPage(el) fetches its own fresh usage snapshot
+// each time it's called, rather than relying on state cached elsewhere.
 async function renderSubscriptionSettingsPage(el) {
   el.innerHTML = `<div class="subscription-settings-page">Loading…</div>`;
   let usage;
@@ -1182,6 +1191,11 @@ async function init() {
   document.getElementById("askPhoenixClose").onclick = closeAskPhoenix;
   document.getElementById("askPhoenixOverlay").onclick = (e) => {
     if (e.target.id === "askPhoenixOverlay") closeAskPhoenix();
+  };
+
+  document.getElementById("subscriptionClose").onclick = closeSubscriptionModal;
+  document.getElementById("subscriptionOverlay").onclick = (e) => {
+    if (e.target.id === "subscriptionOverlay") closeSubscriptionModal();
   };
 
   document.getElementById("brandHome").onclick = showHome;

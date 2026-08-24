@@ -96,30 +96,32 @@ function renderAuthSection() {
   if (window.Clerk.user) {
     if (_authButtonMounted) return;
     el.innerHTML = "";
-    // Subscription status/upgrade/cancel lives as a custom "Subscription"
-    // page inside Clerk's own "Manage account" modal (alongside Profile,
-    // Security, etc.) rather than a separate header dropdown -- a paid
-    // account is always a signed-in Clerk account (doUpgrade() in app.js
-    // forces sign-in first), so this is a legitimate single home for it.
-    // renderSubscriptionSettingsPage is defined in app.js, loaded before
-    // this callback ever fires (it only runs once the user opens the
-    // page from the modal, well after both scripts have loaded).
+    // Subscription status/upgrade/cancel opens as its own modal (see
+    // app.js's openSubscriptionModal), reached via a customMenuItems
+    // link right in Clerk's account popover -- a paid account is always
+    // a signed-in Clerk account (doUpgrade() in app.js forces sign-in
+    // first), so surfacing it from here is the natural single home for
+    // it. This was originally a custom page nested inside Clerk's own
+    // "Manage account" profile modal (userProfileProps.customPages),
+    // which never actually rendered in practice -- this app loads Clerk
+    // in a non-standard way (manual ui.ClerkUI injection, see the
+    // waitForClerk() comment above) to dodge a Monaco AMD collision, and
+    // that path apparently doesn't support nested custom profile pages.
+    // customMenuItems is a much simpler contract (just an onClick) with
+    // no such gap.
     window.Clerk.mountUserButton(el, {
-      userProfileProps: {
-        customPages: [
-          {
-            label: "Subscription",
-            mount: (pageEl) => {
-              if (typeof renderSubscriptionSettingsPage === "function") {
-                renderSubscriptionSettingsPage(pageEl);
-              }
-            },
-            unmount: (pageEl) => {
-              if (pageEl) pageEl.innerHTML = "";
-            },
+      customMenuItems: [
+        {
+          label: "Subscription",
+          onClick: () => {
+            if (typeof openSubscriptionModal === "function") {
+              openSubscriptionModal();
+            }
           },
-        ],
-      },
+          mountIcon: (iconEl) => { iconEl.textContent = "💳"; },
+          unmountIcon: (iconEl) => { if (iconEl) iconEl.textContent = ""; },
+        },
+      ],
     });
     _authButtonMounted = true;
   } else {
