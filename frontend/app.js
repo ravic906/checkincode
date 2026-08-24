@@ -174,8 +174,16 @@ function formatProUntil(isoDate) {
   }
 }
 
-async function doCancelSubscription() {
-  if (!confirm("Cancel your subscription? You'll keep Pro access until your current period ends, then it reverts to free. No refund for time already paid.")) return;
+async function doCancelSubscription(hasExpiry) {
+  // Wording has to match what actually happens server-side (see
+  // users.cancel_pro): a real prepaid period just stops auto-renewing
+  // and runs out naturally, but a grandfathered no-expiry paid account
+  // (one from before this feature existed) has nothing to run out, so
+  // cancelling it downgrades to free immediately instead.
+  const message = hasExpiry
+    ? "Cancel your subscription? You'll keep Pro access until your current period ends, then it reverts to free. No refund for time already paid."
+    : "Cancel your Pro access? This account has no prepaid period on file, so this will downgrade you to Free immediately.";
+  if (!confirm(message)) return;
   try {
     await api("/api/payments/cancel", { method: "POST" });
     await refreshTierBadge();
@@ -196,11 +204,10 @@ async function refreshTierBadge() {
     } else if (until) {
       badge.innerHTML = `Pro until ${until} <button id="cancelSubBtn">Cancel</button>`;
     } else {
-      // Admin-granted Pro with no expiry -- nothing to cancel via self-serve.
-      badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix`;
+      badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix <button id="cancelSubBtn">Cancel</button>`;
     }
     const cancelBtn = document.getElementById("cancelSubBtn");
-    if (cancelBtn) cancelBtn.onclick = doCancelSubscription;
+    if (cancelBtn) cancelBtn.onclick = () => doCancelSubscription(!!until);
   } else {
     // The daily submission counter rarely binds in practice -- the
     // free-tier problem lock is the restriction that actually matters,

@@ -240,17 +240,28 @@ def set_pro_period(user_id: str, plan: str, email: str | None = None):
 
 
 def cancel_pro(user_id: str) -> dict | None:
-    """Self-serve cancel: stops the plan from being treated as auto-
-    renewing, but does NOT revoke access or touch tier/pro_expires_at --
-    there's no refund and no early cutoff, access simply runs out
-    naturally (see the lazy expiry check in get_usage()). Returns the
-    updated row, or None if the user has no active Pro period to cancel."""
+    """Self-serve cancel. Two cases:
+
+    - Has a real prepaid period (pro_expires_at set, the normal path
+      going forward): just stops it being treated as auto-renewing.
+      No refund, no early cutoff -- access runs out naturally at
+      pro_expires_at (see the lazy expiry check in get_usage()).
+    - Grandfathered paid account from before this feature existed
+      (tier='paid', pro_expires_at NULL -- e.g. an old one-time
+      payment or an admin grant): there's no prepaid window to let
+      run out, so cancelling here downgrades to free immediately
+      instead of silently doing nothing.
+
+    Returns the updated row, or None if the user isn't paid at all."""
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
             cur.execute(
                 """
-                UPDATE users SET pro_auto_renew = FALSE
-                WHERE id = %s AND tier = 'paid' AND pro_expires_at IS NOT NULL
+                UPDATE users SET
+                    pro_auto_renew = CASE WHEN pro_expires_at IS NOT NULL THEN FALSE ELSE pro_auto_renew END,
+                    tier = CASE WHEN pro_expires_at IS NULL THEN 'free' ELSE tier END,
+                    pro_plan = CASE WHEN pro_expires_at IS NULL THEN NULL ELSE pro_plan END
+                WHERE id = %s AND tier = 'paid'
                 RETURNING *
                 """,
                 (user_id,),
