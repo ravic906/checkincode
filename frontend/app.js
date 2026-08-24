@@ -192,45 +192,38 @@ async function doCancelSubscription(hasExpiry) {
   }
 }
 
-// Wired once: clicking the compact account-menu toggle opens/closes the
-// panel; clicking outside it, or pressing Escape, closes it. Mirrors the
-// same dismissible-panel pattern openAskPhoenix()/closeAskPhoenix() use.
-let _accountMenuWired = false;
-function wireAccountMenuToggle() {
-  if (_accountMenuWired) return;
-  _accountMenuWired = true;
-  const toggle = document.getElementById("accountMenuToggle");
-  const panel = document.getElementById("accountMenuPanel");
-  toggle.onclick = () => { panel.hidden = !panel.hidden; };
-  document.addEventListener("click", (e) => {
-    if (!panel.hidden && !e.target.closest("#accountMenu")) panel.hidden = true;
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !panel.hidden) panel.hidden = true;
-  });
-}
+// Subscription management lives inside Clerk's own "Manage account" modal
+// now (see auth.js's customPages wiring) rather than a separate header
+// dropdown -- a paid account is always a signed-in Clerk account (doUpgrade
+// forces sign-in first), so Clerk's own account settings is a reasonable,
+// single home for it instead of a bespoke menu next to it.
+//
+// renderSubscriptionSettingsPage(el) is called by Clerk each time the
+// custom "Subscription" page mounts, so it fetches its own fresh usage
+// snapshot rather than relying on state cached elsewhere.
+async function renderSubscriptionSettingsPage(el) {
+  el.innerHTML = `<div class="subscription-settings-page">Loading…</div>`;
+  let usage;
+  try {
+    usage = await refreshTierBadge();
+  } catch (e) {
+    el.innerHTML = `<div class="subscription-settings-page">Couldn't load subscription status: ${e.message}</div>`;
+    return;
+  }
 
-async function refreshTierBadge() {
-  const usage = await api("/api/usage");
-  currentTier = usage.tier;
-  const toggle = document.getElementById("accountMenuToggle");
-  const panel = document.getElementById("accountMenuPanel");
   const isPaid = usage.tier === "paid";
-  toggle.classList.toggle("paid", isPaid);
-  document.getElementById("brandPro").hidden = !isPaid;
-
+  let body;
   if (isPaid) {
     const until = usage.pro_expires_at ? formatProUntil(usage.pro_expires_at) : null;
-    toggle.textContent = until ? `Pro · ${until}` : "Pro";
+    let status;
     if (usage.pro_auto_renew === false && until) {
-      panel.innerHTML = `Pro — cancelled, access until ${until}`;
+      status = `<p class="subscription-status">Pro — cancelled, access until <strong>${until}</strong></p>`;
     } else if (until) {
-      panel.innerHTML = `Pro until ${until}<button class="cancel-btn" id="cancelSubBtn">Cancel</button>`;
+      status = `<p class="subscription-status">Pro until <strong>${until}</strong></p><button class="cancel-btn" id="cancelSubBtn">Cancel subscription</button>`;
     } else {
-      panel.innerHTML = `Pro — full problem library, unlimited Ask Phoenix<button class="cancel-btn" id="cancelSubBtn">Cancel</button>`;
+      status = `<p class="subscription-status">Pro — full problem library, unlimited Ask Phoenix</p><button class="cancel-btn" id="cancelSubBtn">Cancel subscription</button>`;
     }
-    const cancelBtn = document.getElementById("cancelSubBtn");
-    if (cancelBtn) cancelBtn.onclick = () => doCancelSubscription(!!until);
+    body = `<h2>Subscription</h2>${status}`;
   } else {
     // The daily submission counter rarely binds in practice -- the
     // free-tier problem lock is the restriction that actually matters,
@@ -238,11 +231,27 @@ async function refreshTierBadge() {
     // looks generous on its own ("0/20 submissions" reads like broad
     // access). Deliberately no exact counts here (bank size and
     // free-tier fraction aren't things we want to publish in the UI).
-    toggle.textContent = "Free";
-    panel.innerHTML = `<div class="plan-buttons">${planButtonsHtml("upgrade")}</div>`;
-    wirePlanButtons("upgrade");
+    body = `<h2>Subscription</h2><p class="subscription-status">You're on the Free plan.</p><div class="plan-buttons">${planButtonsHtml("settingsUpgrade")}</div>`;
   }
-  wireAccountMenuToggle();
+  el.innerHTML = `<div class="subscription-settings-page">${body}</div>`;
+
+  if (isPaid) {
+    const cancelBtn = document.getElementById("cancelSubBtn");
+    const hasExpiry = !!usage.pro_expires_at;
+    if (cancelBtn) cancelBtn.onclick = () => doCancelSubscription(hasExpiry).then(() => renderSubscriptionSettingsPage(el));
+  } else {
+    wirePlanButtons("settingsUpgrade");
+  }
+}
+
+// Keeps app-wide identity state (currentTier, the header's embossed "Pro"
+// wordmark, admin nav visibility) in sync -- called on load, after
+// sign-in/out, and after any subscription change. No longer touches a
+// header dropdown directly (see renderSubscriptionSettingsPage above).
+async function refreshTierBadge() {
+  const usage = await api("/api/usage");
+  currentTier = usage.tier;
+  document.getElementById("brandPro").hidden = usage.tier !== "paid";
   document.getElementById("adminNavLink").style.display = usage.is_admin ? "inline-flex" : "none";
   return usage;
 }

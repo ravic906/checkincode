@@ -96,7 +96,31 @@ function renderAuthSection() {
   if (window.Clerk.user) {
     if (_authButtonMounted) return;
     el.innerHTML = "";
-    window.Clerk.mountUserButton(el);
+    // Subscription status/upgrade/cancel lives as a custom "Subscription"
+    // page inside Clerk's own "Manage account" modal (alongside Profile,
+    // Security, etc.) rather than a separate header dropdown -- a paid
+    // account is always a signed-in Clerk account (doUpgrade() in app.js
+    // forces sign-in first), so this is a legitimate single home for it.
+    // renderSubscriptionSettingsPage is defined in app.js, loaded before
+    // this callback ever fires (it only runs once the user opens the
+    // page from the modal, well after both scripts have loaded).
+    window.Clerk.mountUserButton(el, {
+      userProfileProps: {
+        customPages: [
+          {
+            label: "Subscription",
+            mount: (pageEl) => {
+              if (typeof renderSubscriptionSettingsPage === "function") {
+                renderSubscriptionSettingsPage(pageEl);
+              }
+            },
+            unmount: (pageEl) => {
+              if (pageEl) pageEl.innerHTML = "";
+            },
+          },
+        ],
+      },
+    });
     _authButtonMounted = true;
   } else {
     if (_authButtonMounted) {

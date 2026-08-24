@@ -71,22 +71,11 @@ body {
 
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 
-.tier-badge {
-  font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  cursor: default;
-}
-.tier-badge.paid { color: #0f1115; background: linear-gradient(90deg,#f6d365,#fda085); border: none; font-weight: 600; }
-
 /* Embossed "PRO" wordmark badge -- a small gradient-filled pill with an
    inset highlight/shadow, not gradient text: background-clip:text plus an
    emboss text-shadow reads muddy at this size, a pill reads as pressed
-   metal reliably. Same gold as .tier-badge.paid so "premium" is one
-   consistent material across the UI, not two different golds. */
+   metal reliably. Same gold used in the subscription settings page's
+   plan buttons so "premium" is one consistent material across the UI. */
 .brand-pro {
   margin-left: 6px;
   padding: 2px 7px;
@@ -104,61 +93,37 @@ body {
   text-shadow: 0 1px 0 rgba(255,255,255,0.35);
 }
 
-/* Account menu -- the tier badge is now a compact toggle that opens a
-   dropdown panel holding the same upgrade/status/cancel content that
-   used to sit directly in the header. */
-.account-menu { position: relative; }
-.account-menu-toggle {
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  cursor: pointer;
+/* Subscription settings page -- rendered inside Clerk's own "Manage
+   account" modal as a custom page (see auth.js's customPages wiring), so
+   it needs to hold its own light-mode palette rather than this site's
+   dark --panel/--border tokens: Clerk's default theme is light and these
+   tokens would render a dark box floating inside it. */
+.subscription-settings-page { color: #1f2430; font-size: 14px; }
+.subscription-settings-page h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  color: #1f2430;
 }
-.account-menu-toggle.paid { color: #0f1115; background: linear-gradient(90deg,#f6d365,#fda085); border: none; font-weight: 600; }
-.account-menu-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 240px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px;
-  box-shadow: 0 12px 28px -12px rgba(0,0,0,0.55);
-  z-index: 20;
+.subscription-settings-page .subscription-status { margin: 0 0 14px; color: #4b5468; }
+.subscription-settings-page .plan-buttons { display: flex; flex-direction: column; gap: 8px; max-width: 260px; }
+.subscription-settings-page .plan-buttons button {
   font-size: 13px;
-}
-.account-menu-panel .plan-buttons { display: flex; flex-direction: column; gap: 8px; }
-.account-menu-panel button {
-  font-size: 12px;
   background: linear-gradient(90deg,#f6d365,#fda085);
   border: none;
   color: #0f1115;
   font-weight: 700;
-  padding: 7px 12px;
+  padding: 9px 14px;
   border-radius: 6px;
   cursor: pointer;
-  width: 100%;
 }
-.account-menu-panel .cancel-btn {
-  margin-top: 10px;
+.subscription-settings-page .cancel-btn {
   background: none;
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border: 1px solid #d7dbe3;
+  color: #4b5468;
   font-weight: 500;
-}
-.tier-badge button {
-  margin-left: 8px;
-  font-size: 11px;
-  background: var(--accent);
-  color: white;
-  border: none;
+  padding: 8px 14px;
   border-radius: 6px;
-  padding: 3px 8px;
   cursor: pointer;
 }
 
@@ -780,7 +745,6 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
   .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .topbar-right { flex-wrap: wrap; gap: 8px; width: 100%; justify-content: flex-end; }
-  .tier-badge { font-size: 11px; padding: 5px 10px; }
 
   .problem-header, .tables-section, .editor-section, .results-section {
     padding-left: 16px;
