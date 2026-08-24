@@ -171,16 +171,34 @@ def _phoenix_safe_repr(v):
     except Exception:
         return repr(v)
 
+def _phoenix_table_cell(v):
+    # Table cells match SQL's own convention (sandbox._normalize_cell:
+    # plain str(), no quotes) rather than _phoenix_safe_repr's Python-
+    # literal repr() -- a cell showing 'A' with quotes reads as leaked
+    # code next to SQL's plain A, which is exactly the inconsistency this
+    # table rendering was built to eliminate. NaN (pandas' float NaN,
+    # distinct from None) is normalized to None so it renders as the same
+    # NULL badge SQL's missing values already use.
+    try:
+        if v is None:
+            return None
+        if isinstance(v, float) and v != v:  # NaN != NaN
+            return None
+        if hasattr(v, "isoformat"):
+            return str(v.isoformat())
+        return str(v)
+    except Exception:
+        return _phoenix_safe_repr(v)
+
 def _phoenix_capture_value(v):
     # A DataFrame-shaped value (2-D, has .columns) renders as a real table
     # client-side instead of a repr string dumped into a <pre> block --
     # detected structurally so this works without a hard pandas import
-    # here. Cells go through _phoenix_safe_repr too, so a cell that's
-    # itself a NaN/Timestamp/etc. still stringifies safely.
+    # here.
     try:
         if hasattr(v, "columns") and hasattr(v, "shape") and len(v.shape) == 2:
             cols = [str(c) for c in v.columns]
-            rows = [[_phoenix_safe_repr(cell) for cell in row] for row in v.astype(object).values.tolist()]
+            rows = [[_phoenix_table_cell(cell) for cell in row] for row in v.astype(object).values.tolist()]
             return {{"_table": True, "columns": cols, "rows": rows}}
     except Exception:
         pass
