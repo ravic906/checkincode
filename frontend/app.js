@@ -886,8 +886,19 @@ function renderPreviewTable(preview) {
 async function runQuery(isSubmit) {
   const query = monacoEditor.getValue();
   const isPython = currentProblem.track === "python";
+  const isSql = currentProblem.track === "sql";
   const resultsSection = document.getElementById("resultsSection");
-  resultsSection.innerHTML = `<div class="loading-dots">${isPython ? "Running in the sandbox…" : "Running against DuckDB…"}</div>`;
+
+  // Run is SQL-only for now -- it checks a short slice of the problem's
+  // hidden datasets (a fast iteration signal) and never touches the daily
+  // quota or solved-status, only Submit can mark a problem solved. Python
+  // has no lighter-weight variant to offer (its grading is already one
+  // full test_code run either way), so its Run button still hits the
+  // same endpoint Submit does, same as before this split existed.
+  const useRunEndpoint = isSql && !isSubmit;
+  resultsSection.innerHTML = `<div class="loading-dots">${
+    isPython ? "Running in the sandbox…" : useRunEndpoint ? "Checking…" : "Verifying against DuckDB…"
+  }</div>`;
 
   const runBtn = document.getElementById("runBtn");
   const submitBtn = document.getElementById("submitBtn");
@@ -895,12 +906,12 @@ async function runQuery(isSubmit) {
   submitBtn.disabled = true;
 
   try {
-    const result = await api("/api/submit", {
+    const result = await api(useRunEndpoint ? "/api/run" : "/api/submit", {
       method: "POST",
       body: JSON.stringify({ problem_id: currentProblem.id, query }),
     });
-    if (isPython) renderPythonResult(result); else renderResult(result);
-    if (result.correct) {
+    if (isPython) renderPythonResult(result); else renderResult(result, useRunEndpoint);
+    if (result.correct && isSubmit) {
       const problemsRes = await api("/api/problems");
       allProblems = problemsRes.problems;
       renderProblemList();
@@ -924,12 +935,18 @@ async function runQuery(isSubmit) {
   }
 }
 
-function renderResult(result) {
+function renderResult(result, isPartialCheck = false) {
   const resultsSection = document.getElementById("resultsSection");
   let html = "";
 
   if (result.correct) {
-    html += `<div class="result-banner pass">✅ Correct! Verified against DuckDB.</div>`;
+    // Run only checks a short slice of the problem's hidden datasets --
+    // saying "Verified" here would overstate what actually passed, since
+    // Submit's full check could still catch something Run's smaller
+    // slice didn't happen to exercise.
+    html += isPartialCheck
+      ? `<div class="result-banner pass">✅ Passes so far — Submit to fully verify.</div>`
+      : `<div class="result-banner pass">✅ Correct! Verified against DuckDB.</div>`;
   } else {
     html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
 
