@@ -519,7 +519,7 @@ function renderExamples(p) {
     return `
       <div class="tables-section">
         <h3>Sample Input / Output</h3>
-        <div class="schema-block example-block">${rows}</div>
+        <div class="example-block">${rows}</div>
       </div>
     `;
   }

@@ -296,25 +296,40 @@ body {
   overflow-x: auto;
 }
 
-.example-block { margin-bottom: 0; }
-.example-item { padding: 4px 0; }
-.example-item + .example-item { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; }
+/* Sits directly under the "Sample Input / Output" heading with the same
+   14px rhythm SQL's own .sample-table-wrap uses between items -- no
+   enclosing card here, since an item's value may itself be a real table
+   (.sample-table-wrap already draws its own box) and double-boxing a
+   table inside a code-styled card is what made this read as messy. */
+.example-block { display: flex; flex-direction: column; gap: 14px; }
+.example-item { padding: 0; }
+.example-item + .example-item { border-top: 1px solid var(--border); padding-top: 14px; }
 .example-io + .example-io { margin-top: 10px; }
 .example-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
+/* The code-card look (mono font, panel background, border) lives on the
+   individual scalar value now, not on the whole Input/Output section --
+   matches .schema-block's material for an actual code snippet, without
+   forcing it onto a table value that renders its own box instead. */
 .example-call, .example-result {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: inherit;
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
 .example-call { color: #a5d6ff; }
 .example-result { color: #7ee787; }
+.example-io .sample-table-wrap { margin-bottom: 0; }
 
 .sample-table-wrap { margin-bottom: 16px; overflow-x: auto; }
 .sample-table-wrap h4 { font-size: 12px; color: var(--text); margin: 0 0 6px 0; font-family: "SF Mono", Consolas, monospace; }
