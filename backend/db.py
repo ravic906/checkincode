@@ -214,6 +214,20 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE
             """)
+            # Migration: prepaid Pro access window (monthly/yearly), added
+            # when self-serve cancel + a yearly plan were introduced.
+            # There's no real recurring auto-debit -- a payment just buys
+            # `paid` access until pro_expires_at, and cancelling only stops
+            # it from being renewed, it doesn't revoke access early.
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_plan TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_expires_at TIMESTAMPTZ
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_auto_renew BOOLEAN NOT NULL DEFAULT TRUE
+            """)
 
 
 def dict_cursor(conn):

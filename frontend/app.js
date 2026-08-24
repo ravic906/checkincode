@@ -150,13 +150,57 @@ function showInterviewScreen() {
   closeAskPhoenix();
 }
 
+// Shared markup/wiring for a Monthly + Yearly choice, reused by the tier
+// badge and every inline upsell prompt so upgrading always offers both
+// plans rather than defaulting one path to monthly silently.
+function planButtonsHtml(idPrefix) {
+  return (
+    `<button id="${idPrefix}Monthly">${priceWithLocalEstimate(199, "mo")}</button> ` +
+    `<button id="${idPrefix}Yearly">${priceWithLocalEstimate(1990, "yr")}</button>`
+  );
+}
+function wirePlanButtons(idPrefix) {
+  const m = document.getElementById(`${idPrefix}Monthly`);
+  const y = document.getElementById(`${idPrefix}Yearly`);
+  if (m) m.onclick = () => doUpgrade("monthly");
+  if (y) y.onclick = () => doUpgrade("yearly");
+}
+
+function formatProUntil(isoDate) {
+  try {
+    return new Date(isoDate).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch (e) {
+    return isoDate;
+  }
+}
+
+async function doCancelSubscription() {
+  if (!confirm("Cancel your subscription? You'll keep Pro access until your current period ends, then it reverts to free. No refund for time already paid.")) return;
+  try {
+    await api("/api/payments/cancel", { method: "POST" });
+    await refreshTierBadge();
+  } catch (e) {
+    alert(`Couldn't cancel: ${e.message}`);
+  }
+}
+
 async function refreshTierBadge() {
   const usage = await api("/api/usage");
   currentTier = usage.tier;
   const badge = document.getElementById("tierBadge");
   badge.classList.toggle("paid", usage.tier === "paid");
   if (usage.tier === "paid") {
-    badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix`;
+    const until = usage.pro_expires_at ? formatProUntil(usage.pro_expires_at) : null;
+    if (usage.pro_auto_renew === false && until) {
+      badge.innerHTML = `Pro — cancelled, access until ${until}`;
+    } else if (until) {
+      badge.innerHTML = `Pro until ${until} <button id="cancelSubBtn">Cancel</button>`;
+    } else {
+      // Admin-granted Pro with no expiry -- nothing to cancel via self-serve.
+      badge.innerHTML = `Pro — full problem library, unlimited Ask Phoenix`;
+    }
+    const cancelBtn = document.getElementById("cancelSubBtn");
+    if (cancelBtn) cancelBtn.onclick = doCancelSubscription;
   } else {
     // The daily submission counter rarely binds in practice -- the
     // free-tier problem lock is the restriction that actually matters,
@@ -164,10 +208,9 @@ async function refreshTierBadge() {
     // looks generous on its own ("0/20 submissions" reads like broad
     // access). Deliberately no exact counts here (bank size and
     // free-tier fraction aren't things we want to publish in the UI).
-    badge.innerHTML = `Free — limited problem access <button id="upgradeBtn">Upgrade ${priceWithLocalEstimate(199)}</button>`;
+    badge.innerHTML = `Free — limited problem access ${planButtonsHtml("upgrade")}`;
+    wirePlanButtons("upgrade");
   }
-  const btn = document.getElementById("upgradeBtn");
-  if (btn) btn.onclick = doUpgrade;
   document.getElementById("adminNavLink").style.display = usage.is_admin ? "inline-flex" : "none";
   return usage;
 }
@@ -185,7 +228,7 @@ function loadRazorpayScript() {
   return razorpayScriptPromise;
 }
 
-async function doUpgrade() {
+async function doUpgrade(plan = "monthly") {
   if (typeof isSignedIn !== "function" || !isSignedIn()) {
     if (window.Clerk) window.Clerk.openSignIn({});
     return;
@@ -193,7 +236,10 @@ async function doUpgrade() {
 
   try {
     await loadRazorpayScript();
-    const order = await api("/api/payments/create-order", { method: "POST" });
+    const order = await api("/api/payments/create-order", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
 
     const rzp = new Razorpay({
       key: order.key_id,
@@ -201,7 +247,7 @@ async function doUpgrade() {
       currency: order.currency,
       order_id: order.order_id,
       name: "Phoenix Prep",
-      description: "Pro membership -- ₹199/mo",
+      description: plan === "yearly" ? "Pro membership -- ₹1,990/yr" : "Pro membership -- ₹199/mo",
       prefill: { email: (typeof currentUserEmail === "function" && currentUserEmail()) || "" },
       theme: { color: "#4f8cff" },
       handler: async (response) => {
@@ -366,14 +412,14 @@ const CURRENCY_SYMBOL = {
   USD: "$", GBP: "£", CAD: "C$", AUD: "A$", NZD: "NZ$",
   EUR: "€", SGD: "S$", AED: "AED ", JPY: "¥", ZAR: "R", BRL: "R$", MXN: "MX$",
 };
-function priceWithLocalEstimate(inrAmount) {
-  const base = `₹${inrAmount}/mo`;
+function priceWithLocalEstimate(inrAmount, period = "mo") {
+  const base = `₹${inrAmount}/${period}`;
   try {
     const region = (navigator.language || "").split("-")[1]?.toUpperCase();
     const currency = region && region !== "IN" ? REGION_CURRENCY[region] : null;
     if (!currency) return base;
     const converted = (inrAmount / INR_PER_UNIT[currency]).toFixed(2);
-    return `${base} (≈ ${CURRENCY_SYMBOL[currency]}${converted}/mo)`;
+    return `${base} (≈ ${CURRENCY_SYMBOL[currency]}${converted}/${period})`;
   } catch (e) {
     return base;
   }
@@ -607,7 +653,7 @@ function showUpsell() {
       <br/><button id="inlineUpgradeBtn">Upgrade now</button>
     </div>
   `;
-  document.getElementById("inlineUpgradeBtn").onclick = doUpgrade;
+  document.getElementById("inlineUpgradeBtn").onclick = () => doUpgrade("monthly");
 }
 
 async function loadProblem(id) {
@@ -860,7 +906,7 @@ async function runQuery(isSubmit) {
         This problem is part of Pro. Upgrade to ${priceWithLocalEstimate(199)} to unlock every practice problem.
         <br/><button id="inlineUpgradeBtn">Upgrade now</button>
       </div>`;
-      document.getElementById("inlineUpgradeBtn").onclick = doUpgrade;
+      document.getElementById("inlineUpgradeBtn").onclick = () => doUpgrade("monthly");
     } else {
       resultsSection.innerHTML = `<div class="result-banner fail">Error: ${escapeHtml(e.message)}</div>`;
     }
@@ -892,7 +938,7 @@ function renderResult(result) {
 
   resultsSection.innerHTML = html;
   const upBtn = document.getElementById("inlineUpgradeBtn");
-  if (upBtn) upBtn.onclick = doUpgrade;
+  if (upBtn) upBtn.onclick = () => doUpgrade("monthly");
 }
 
 function renderPythonResult(result) {
@@ -911,7 +957,7 @@ function renderPythonResult(result) {
 
   resultsSection.innerHTML = html;
   const upBtn = document.getElementById("inlineUpgradeBtn");
-  if (upBtn) upBtn.onclick = doUpgrade;
+  if (upBtn) upBtn.onclick = () => doUpgrade("monthly");
 }
 
 // -------- Ask Phoenix: open-ended contextual help, any time a problem is loaded --------
@@ -939,7 +985,7 @@ function renderAskPhoenixBody() {
         <br/><button id="askPhoenixUpgradeBtn">Upgrade now</button>
       </div>
     `;
-    document.getElementById("askPhoenixUpgradeBtn").onclick = doUpgrade;
+    document.getElementById("askPhoenixUpgradeBtn").onclick = () => doUpgrade("monthly");
     return;
   }
 

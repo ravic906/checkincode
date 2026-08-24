@@ -235,6 +235,9 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "interviews_this_month": u["interviews_this_month"],
         "max_interviews_per_month": MAX_INTERVIEWS_PER_MONTH,
         "is_admin": users_module.is_admin(user_id),
+        "pro_plan": u["pro_plan"],
+        "pro_expires_at": u["pro_expires_at"],
+        "pro_auto_renew": u["pro_auto_renew"],
     }
 
 
@@ -276,6 +279,10 @@ def api_merge_progress(req: MergeProgressRequest, x_user_id: str = Header(defaul
     return {"merged_submissions": merged}
 
 
+class CreateOrderRequest(BaseModel):
+    plan: str = "monthly"  # "monthly" | "yearly"
+
+
 class VerifyPaymentRequest(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
@@ -283,12 +290,14 @@ class VerifyPaymentRequest(BaseModel):
 
 
 @app.post("/api/payments/create-order")
-def api_payments_create_order(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+def api_payments_create_order(req: CreateOrderRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     if not user_id.startswith("clerk:"):
         raise HTTPException(401, "Sign in before upgrading -- Pro is tied to your account, not an anonymous browser id.")
+    if req.plan not in payments.PLAN_PRICES_PAISE:
+        raise HTTPException(400, "plan must be 'monthly' or 'yearly'")
     try:
-        return payments.create_order(user_id)
+        return payments.create_order(user_id, req.plan)
     except payments.PaymentsNotConfigured as e:
         raise HTTPException(503, str(e))
 
@@ -304,8 +313,34 @@ def api_payments_verify(req: VerifyPaymentRequest, x_user_id: str = Header(defau
         raise HTTPException(503, str(e))
     if not ok:
         raise HTTPException(400, "Payment signature verification failed.")
-    users_module.set_tier(user_id, "paid")
-    return {"user_id": user_id, "tier": "paid"}
+
+    # Read the plan back from Razorpay's own order record rather than
+    # trusting a client-supplied value -- the order's notes are the
+    # authoritative account of what was actually paid for.
+    try:
+        order = payments.get_order(req.razorpay_order_id)
+    except payments.PaymentsNotConfigured as e:
+        raise HTTPException(503, str(e))
+    plan = (order.get("notes") or {}).get("plan", "monthly")
+    if plan not in payments.PLAN_PRICES_PAISE:
+        plan = "monthly"
+
+    users_module.set_pro_period(user_id, plan)
+    return {"user_id": user_id, "tier": "paid", "plan": plan}
+
+
+@app.post("/api/payments/cancel")
+def api_payments_cancel(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """Self-serve cancel. No refund, no early cutoff -- Pro access simply
+    runs out at the end of the period already paid for (pro_expires_at),
+    instead of being revoked immediately."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    if not user_id.startswith("clerk:"):
+        raise HTTPException(401, "Sign in first.")
+    updated = users_module.cancel_pro(user_id)
+    if updated is None:
+        raise HTTPException(400, "No active Pro subscription to cancel.")
+    return updated
 
 
 def _preview(columns, rows, limit=10):
