@@ -25,6 +25,7 @@ INTERVIEW_DURATION_SECONDS = 45 * 60
 MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
 TRIAL_DURATION_SECONDS = 10 * 60  # fixed length for a free-tier trial interview, below the paid 20-45 min range
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
+MAX_TURNS_INTRO = 2  # intro question + at most 1 follow-up -- it's a brief icebreaker, not a real interview topic, so the generic 3-turn budget is too generous here
 
 # The interview can talk about every topic, including DML -- it's purely
 # conversational, nothing gets executed, so the sandbox's read-only
@@ -173,7 +174,8 @@ def mark_ended(session: dict, feedback: dict):
 
 
 def topic_cap_reached(session: dict) -> bool:
-    return session["current_topic_turns"] >= MAX_TURNS_PER_TOPIC
+    limit = MAX_TURNS_INTRO if session["current_topic"] == "intro" else MAX_TURNS_PER_TOPIC
+    return session["current_topic_turns"] >= limit
 
 
 def next_topic(session: dict, topics: list[str]) -> str:
