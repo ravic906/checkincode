@@ -26,6 +26,7 @@ MIN_INTERVIEW_DURATION_SECONDS = 20 * 60
 TRIAL_DURATION_SECONDS = 10 * 60  # fixed length for a free-tier trial interview, below the paid 20-45 min range
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 MAX_TURNS_INTRO = 2  # intro question + at most 1 follow-up -- it's a brief icebreaker, not a real interview topic, so the generic 3-turn budget is too generous here
+CONNECTION_ISSUE_THRESHOLD = 2  # 2 consecutive STT/LLM failures -- one retry chance after the first, then proactively offer to retry/pause/end
 
 # Superseded by role_topics.topics_for_role(target_role) now that every
 # interview is role-based (SQL topics blended with conceptual ones) rather
@@ -56,6 +57,7 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
         "current_topic": None,
         "current_topic_turns": 0,
         "hint_used_this_topic": False,
+        "consecutive_failures": 0,
         "last_table_context": None,
         "ended": False,
         "feedback": None,
@@ -68,8 +70,8 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                 INSERT INTO interview_sessions
                     (session_id, user_id, mode, target_role, candidate_profile, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
-                     current_topic_turns, hint_used_this_topic, last_table_context, ended, feedback, persona)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     current_topic_turns, hint_used_this_topic, consecutive_failures, last_table_context, ended, feedback, persona)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
@@ -78,6 +80,7 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                     session["started_at"], json.dumps(session["topics_covered"]),
                     json.dumps(session["conversation"]), session["current_topic"],
                     session["current_topic_turns"], session["hint_used_this_topic"],
+                    session["consecutive_failures"],
                     json.dumps(session["last_table_context"]),
                     session["ended"], json.dumps(session["feedback"]), session["persona"],
                 ),
@@ -95,13 +98,15 @@ def save_session(session: dict):
                 """
                 UPDATE interview_sessions SET
                     topics_covered=%s, conversation=%s, current_topic=%s,
-                    current_topic_turns=%s, hint_used_this_topic=%s, last_table_context=%s, ended=%s, feedback=%s
+                    current_topic_turns=%s, hint_used_this_topic=%s, consecutive_failures=%s,
+                    last_table_context=%s, ended=%s, feedback=%s
                 WHERE session_id=%s
                 """,
                 (
                     json.dumps(session["topics_covered"]), json.dumps(session["conversation"]),
                     session["current_topic"], session["current_topic_turns"],
                     session.get("hint_used_this_topic", False),
+                    session.get("consecutive_failures", 0),
                     json.dumps(session["last_table_context"]), session["ended"],
                     json.dumps(session["feedback"]), session["session_id"],
                 ),
@@ -178,6 +183,23 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
         if candidate_stuck:
             session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
     save_session(session)
+
+
+def record_failure(session: dict):
+    """[Evaluator] Counts a consecutive STT/LLM failure toward
+    CONNECTION_ISSUE_THRESHOLD -- called from the except-block of any
+    interview endpoint that can fail transiently (LLM call, transcription).
+    """
+    session["consecutive_failures"] = session.get("consecutive_failures", 0) + 1
+    save_session(session)
+
+
+def reset_failures(session: dict):
+    """Called after any successful turn, so an isolated glitch doesn't
+    accumulate toward the threshold across unrelated later turns."""
+    if session.get("consecutive_failures"):
+        session["consecutive_failures"] = 0
+        save_session(session)
 
 
 def set_last_table_context(session: dict, table_context: dict | None):

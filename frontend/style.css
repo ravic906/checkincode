@@ -455,6 +455,30 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   font-size: 13px;
   margin-bottom: 14px;
 }
+
+/* Shown after repeated STT/LLM connection trouble mid-interview -- a real
+   three-way choice (retry/pause/end) rather than just erroring again. */
+.connection-issue-banner {
+  background: rgba(217,164,65,0.1);
+  border: 1px solid rgba(217,164,65,0.35);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.connection-issue-banner p { margin: 0 0 10px; color: var(--amber); font-weight: 600; }
+.connection-issue-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.connection-issue-btn {
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.connection-issue-btn:hover { border-color: #3a4152; }
+#connIssueRetry { background: linear-gradient(90deg,#f6d365,#fda085); border: none; color: #0f1115; font-weight: 700; }
 .upsell-box button {
   margin-top: 8px;
   background: linear-gradient(90deg,#f6d365,#fda085);

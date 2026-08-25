@@ -93,6 +93,13 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS hint_used_this_topic BOOLEAN NOT NULL DEFAULT FALSE
             """)
+            # Migration: connection-issue detection (Phase 3) -- counts
+            # consecutive STT/LLM failures within a session so the
+            # interviewer can proactively offer to retry/pause/end after
+            # repeated trouble, rather than just erroring on every attempt.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
                     id TEXT PRIMARY KEY,

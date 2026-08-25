@@ -64,6 +64,7 @@ async function uploadResume(file) {
 async function transcribeAudio(blob) {
   const formData = new FormData();
   formData.append("file", blob, "answer.webm");
+  if (interviewState) formData.append("session_id", interviewState.sessionId);
   const res = await fetch(`${API_BASE}/api/interview/stt`, {
     method: "POST",
     headers: { "X-User-Id": USER_ID },
@@ -71,7 +72,9 @@ async function transcribeAudio(blob) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Transcription failed (${res.status})`);
+    const err = new Error(body.detail || `Transcription failed (${res.status})`);
+    err.body = body; // lets callers check body.connection_issue, same as api()'s error shape
+    throw err;
   }
   return res.json();
 }
@@ -667,22 +670,31 @@ async function startListening() {
 
     setMicUi("transcribing");
     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
-    try {
-      const { text } = await transcribeAudio(blob);
-      setMicUi("idle");
-      const trimmed = (text || "").trim();
-      if (trimmed) submitAnswer(trimmed);
-      else if (interimEl) interimEl.textContent = "Didn't catch any speech. Try again.";
-    } catch (err) {
-      setMicUi("idle");
-      if (interimEl) interimEl.textContent = err.message || "Transcription failed. Try again.";
-    }
+    await attemptTranscribe(blob);
   };
 
   skipNextSubmit = false;
   isListening = true;
   setMicUi("listening");
   mediaRecorder.start();
+}
+
+async function attemptTranscribe(blob) {
+  const interimEl = document.getElementById("interimText");
+  try {
+    const { text } = await transcribeAudio(blob);
+    setMicUi("idle");
+    const trimmed = (text || "").trim();
+    if (trimmed) submitAnswer(trimmed);
+    else if (interimEl) interimEl.textContent = "Didn't catch any speech. Try again.";
+  } catch (err) {
+    setMicUi("idle");
+    if (err.body && err.body.connection_issue) {
+      renderConnectionIssuePrompt(() => attemptTranscribe(blob));
+    } else if (interimEl) {
+      interimEl.textContent = err.message || "Transcription failed. Try again.";
+    }
+  }
 }
 
 function stopListening(opts = {}) {
@@ -693,7 +705,12 @@ function stopListening(opts = {}) {
 async function submitAnswer(answerText) {
   interviewState.transcript.push({ role: "user", content: answerText, topic: null });
   renderTranscript();
+  await sendAnswer(answerText);
+}
 
+// Split from submitAnswer so a connection-issue retry can resend the SAME
+// answer_text without re-pushing a duplicate user bubble into the transcript.
+async function sendAnswer(answerText) {
   const micBtn = document.getElementById("micBtn");
   const submitTypedBtn = document.getElementById("submitTypedBtn");
   if (micBtn) micBtn.disabled = true;
@@ -719,12 +736,46 @@ async function submitAnswer(answerText) {
     renderTranscript();
     speak(res.question);
   } catch (err) {
-    interviewState.transcript.push({ role: "assistant", content: `⚠️ ${err.message}`, topic: null });
-    renderTranscript();
+    if (err.body && err.body.connection_issue) {
+      renderConnectionIssuePrompt(() => sendAnswer(answerText));
+    } else {
+      interviewState.transcript.push({ role: "assistant", content: `⚠️ ${err.message}`, topic: null });
+      renderTranscript();
+    }
   } finally {
     if (micBtn) micBtn.disabled = false;
     if (submitTypedBtn) submitTypedBtn.disabled = false;
   }
+}
+
+// Shown after CONNECTION_ISSUE_THRESHOLD consecutive STT/LLM failures (see
+// backend's interview.record_failure) -- offers a real choice instead of
+// just erroring again on the next attempt too. "Pause" needs no new backend
+// state: the existing GET /api/interview/session/{id} resume mechanic
+// already lets the candidate leave and pick back up later.
+function renderConnectionIssuePrompt(retryFn) {
+  const container = document.getElementById("interviewTranscript");
+  if (!container) return;
+  const div = document.createElement("div");
+  div.className = "connection-issue-banner";
+  div.innerHTML = `
+    <p>Having some trouble connecting. What would you like to do?</p>
+    <div class="connection-issue-actions">
+      <button class="connection-issue-btn" id="connIssueRetry">Try again</button>
+      <button class="connection-issue-btn" id="connIssuePause">Pause (resume later)</button>
+      <button class="connection-issue-btn" id="connIssueEnd">End now</button>
+    </div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  document.getElementById("connIssueRetry").onclick = () => { div.remove(); retryFn(); };
+  document.getElementById("connIssuePause").onclick = () => {
+    div.remove();
+    stopSpeaking();
+    stopListening({ skipSubmit: true });
+    showHome();
+  };
+  document.getElementById("connIssueEnd").onclick = () => { div.remove(); endInterview(); };
 }
 
 async function endInterview() {

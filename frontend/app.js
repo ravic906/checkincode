@@ -28,6 +28,7 @@ async function api(path, options = {}) {
     const body = await res.json().catch(() => ({}));
     const err = new Error(body.detail || `Request failed (${res.status})`);
     err.status = res.status;
+    err.body = body; // lets callers inspect extra fields beyond detail, e.g. interview.js's connection_issue handling
     throw err;
   }
   return res.json();
