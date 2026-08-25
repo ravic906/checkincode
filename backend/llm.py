@@ -1331,11 +1331,20 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
         # reply for fields other code depends on structurally" precedent as
         # interview_turn's topic normalization -- record_topic_history()
         # needs every topic_scores entry to be a real topic with a real
-        # score, not whatever the model happened to return.
+        # score, not whatever the model happened to return. Also cross-
+        # checked against topics ACTUALLY covered in the transcript --
+        # observed live to otherwise include an uncovered topic with a
+        # fabricated low score ("this topic was not covered"), which would
+        # silently corrupt the permanent topic-history table with a false
+        # weak-topic signal for something the candidate was never even
+        # asked about.
         all_topics = role_topics.topics_for_role(target_role)
+        covered_topics = {t.get("topic") for t in conversation if t.get("topic")}
         report["topic_scores"] = [
             t for t in report.get("topic_scores", [])
-            if isinstance(t, dict) and t.get("topic") in all_topics and isinstance(t.get("score"), (int, float))
+            if isinstance(t, dict) and t.get("topic") in all_topics
+            and t.get("topic") in covered_topics
+            and isinstance(t.get("score"), (int, float))
         ]
         report.setdefault("question_notes", [])
         report.setdefault("next_practice_plan", [])
