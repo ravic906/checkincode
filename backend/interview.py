@@ -27,13 +27,14 @@ TRIAL_DURATION_SECONDS = 10 * 60  # fixed length for a free-tier trial interview
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 MAX_TURNS_INTRO = 2  # intro question + at most 1 follow-up -- it's a brief icebreaker, not a real interview topic, so the generic 3-turn budget is too generous here
 
-# The interview can talk about every topic, including DML -- it's purely
-# conversational, nothing gets executed, so the sandbox's read-only
-# invariant (see topics.py, sandbox.py) doesn't apply here.
+# Superseded by role_topics.topics_for_role(target_role) now that every
+# interview is role-based (SQL topics blended with conceptual ones) rather
+# than always this one fixed SQL-only list -- kept only in case anything
+# external still imports it; no call site in this codebase reads it anymore.
 GENERIC_TOPICS = topics.ALL_TOPICS
 
 
-def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False, persona: str = "neutral") -> dict:
+def create_session(*, user_id: str, target_role: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False, persona: str = "neutral", candidate_profile: dict | None = None) -> dict:
     if is_trial:
         # A separate branch, not a lowered floor -- so a paid user's
         # request can never accidentally slide under the real 20 min floor.
@@ -43,7 +44,9 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
     session = {
         "session_id": str(uuid.uuid4()),
         "user_id": user_id,
-        "mode": mode,  # "personalized" | "generic"
+        "mode": "role_based",  # legacy NOT NULL column, no longer read anywhere -- see role_topics.py for the real replacement (target_role)
+        "target_role": target_role,  # one of role_topics.ROLES
+        "candidate_profile": candidate_profile,  # [Profile Analyzer] output, computed once at session start
         "resume_text": resume_text,
         "skip_intro": skip_intro,
         "duration_seconds": duration_seconds,
@@ -62,13 +65,14 @@ def create_session(*, user_id: str, mode: str, resume_text: str | None, skip_int
             cur.execute(
                 """
                 INSERT INTO interview_sessions
-                    (session_id, user_id, mode, resume_text, skip_intro, duration_seconds,
+                    (session_id, user_id, mode, target_role, candidate_profile, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
                      current_topic_turns, last_table_context, ended, feedback, persona)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
+                    session["target_role"], json.dumps(session["candidate_profile"]),
                     session["resume_text"], session["skip_intro"], session["duration_seconds"],
                     session["started_at"], json.dumps(session["topics_covered"]),
                     json.dumps(session["conversation"]), session["current_topic"],

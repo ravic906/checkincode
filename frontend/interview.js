@@ -121,7 +121,7 @@ function renderResumePrompt(sessionState) {
 function resumeInterview(sessionState) {
   interviewState = {
     sessionId: sessionState.session_id,
-    mode: sessionState.mode,
+    targetRole: sessionState.target_role,
     resumeText: null,
     remainingSeconds: sessionState.remaining_seconds,
     durationSeconds: sessionState.duration_seconds || 45 * 60,
@@ -138,11 +138,21 @@ function resumeInterview(sessionState) {
   // the question is right there in the transcript to read.
 }
 
+const ROLE_CARDS = [
+  { value: "Data Analyst", icon: "📊", desc: "SQL reporting, metrics, root-cause & experimentation." },
+  { value: "BI Analyst", icon: "📈", desc: "Dashboards, data modeling, stakeholder-facing metrics." },
+  { value: "Business Analyst", icon: "🧾", desc: "Root-cause analysis, forecasting, cross-functional SQL." },
+  { value: "Product Analyst", icon: "🧪", desc: "A/B testing, growth & retention, product sense." },
+  { value: "Data Engineer", icon: "🛠️", desc: "Pipelines, schema design, scaling & governance, full SQL." },
+];
+
 async function renderInterviewSetupScreen() {
   // Free-tier users get one 10-minute trial interview before the 402 wall
   // -- fetch usage fresh so the setup screen can adapt its copy/duration
   // control before they even try to start (rather than only reacting to
-  // the 402 after the fact).
+  // the 402 after the fact). Admins are fully unrestricted (see backend's
+  // is_admin bypass in api_interview_start) -- the setup screen mirrors
+  // that so the UI doesn't show trial/cap copy that no longer applies.
   let usage = null;
   try {
     usage = await api("/api/usage");
@@ -150,8 +160,9 @@ async function renderInterviewSetupScreen() {
     // Fall through with usage=null -- worst case the screen shows the
     // normal Pro copy and the real gate still applies server-side on submit.
   }
-  const isTrialEligible = usage && usage.tier !== "paid" && !usage.interview_trial_used;
-  const isPaidAtCap = usage && usage.tier === "paid" && usage.interviews_this_month >= usage.max_interviews_per_month;
+  const isUnrestricted = !!(usage && usage.is_admin);
+  const isTrialEligible = !isUnrestricted && usage && usage.tier !== "paid" && !usage.interview_trial_used;
+  const isPaidAtCap = !isUnrestricted && usage && usage.tier === "paid" && usage.interviews_this_month >= usage.max_interviews_per_month;
   const remainingThisMonth = usage && usage.tier === "paid" ? usage.max_interviews_per_month - usage.interviews_this_month : null;
 
   const screen = document.getElementById("interviewScreen");
@@ -160,7 +171,7 @@ async function renderInterviewSetupScreen() {
     screen.innerHTML = `
       <div class="interview-setup">
         <div class="interview-eyebrow">Pro · Voice Interview</div>
-        <h1>Mock SQL Interview</h1>
+        <h1>Mock Interview</h1>
         <div class="upsell-box">
           You've used all ${usage.max_interviews_per_month} mock interviews included this month. They reset at the start of next month.
         </div>
@@ -169,39 +180,41 @@ async function renderInterviewSetupScreen() {
     return;
   }
 
-  const monthlyNote = usage && usage.tier === "paid"
+  const monthlyNote = usage && usage.tier === "paid" && !isUnrestricted
     ? `<p class="setup-quota-note">${remainingThisMonth} of ${usage.max_interviews_per_month} interviews left this month</p>`
     : "";
 
   screen.innerHTML = `
     <div class="interview-setup">
-      <div class="interview-eyebrow">${isTrialEligible ? "Free Trial · 10 min" : "Pro · Voice Interview"}</div>
-      <h1>Mock SQL Interview</h1>
+      <div class="interview-eyebrow">${isUnrestricted ? "Admin · Unrestricted" : isTrialEligible ? "Free Trial · 10 min" : "Pro · Voice Interview"}</div>
+      <h1>Mock Interview</h1>
       <p class="home-sub">${isTrialEligible
         ? "Try one free 10-minute mock interview. Upgrade to Pro for the full 20-45 minute experience."
-        : "20-45 minutes, spoken. The interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
+        : "20-45 minutes, spoken. Tailored to your target role and background -- the interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
       ${monthlyNote}
 
       ${!micRecordingSupported ? `<div class="upsell-box">Voice input (speech-to-text) isn't supported in this browser — Chrome or Edge recommended. You can still type your answers below.</div>` : ""}
 
       <div class="setup-card">
-        <div class="setup-section-label">Format</div>
-        <div class="mode-cards" id="modeCards">
-          <label class="mode-card selected" data-value="generic">
-            <input type="radio" name="interviewMode" value="generic" checked />
-            <div class="mode-card-icon">📋</div>
-            <div class="mode-card-title">Generic</div>
-            <div class="mode-card-desc">Core SQL fundamentals — joins, aggregation, subqueries, window functions.</div>
-          </label>
-          <label class="mode-card" data-value="personalized">
-            <input type="radio" name="interviewMode" value="personalized" />
-            <div class="mode-card-icon">📄</div>
-            <div class="mode-card-title">Personalized</div>
-            <div class="mode-card-desc">Grounded in your actual resume and experience.</div>
-          </label>
+        <div class="setup-section-label">Target role</div>
+        <div class="role-cards" id="roleCards">
+          ${ROLE_CARDS.map((r, i) => `
+            <label class="role-card${i === 0 ? " selected" : ""}" data-value="${r.value}">
+              <input type="radio" name="interviewRole" value="${r.value}" ${i === 0 ? "checked" : ""} />
+              <div class="role-card-icon">${r.icon}</div>
+              <div class="role-card-title">${r.value}</div>
+              <div class="role-card-desc">${r.desc}</div>
+            </label>
+          `).join("")}
         </div>
 
-        <div id="resumeUploadRow" class="setup-row" style="display:none;">
+        <div id="resumeRow" class="setup-row">
+          <div class="setup-section-label">Résumé (optional, sharpens the questions)</div>
+          <div id="resumeSavedRow" style="display:none;">
+            <span class="resume-status ok">Using your saved résumé ✓</span>
+            <button type="button" class="resume-manage-btn" id="resumeUpdateBtn">Update</button>
+            <button type="button" class="resume-manage-btn" id="resumeDeleteBtn">Delete</button>
+          </div>
           <label class="file-drop" id="fileDropLabel">
             <input type="file" id="resumeFile" accept=".pdf,.docx" />
             <span id="fileDropText">Choose a résumé (PDF or DOCX)</span>
@@ -250,15 +263,17 @@ async function renderInterviewSetupScreen() {
     </div>
   `;
 
+  // resumeText only tracks a FRESH upload made during this setup visit --
+  // if usage.has_resume is true and nothing new gets uploaded, it stays
+  // null and the backend falls back to the already-saved account resume
+  // (see api_interview_start), so there's nothing to pass explicitly.
   let resumeText = null;
 
-  document.querySelectorAll('.mode-card').forEach(card => {
+  document.querySelectorAll('.role-card').forEach(card => {
     card.addEventListener("click", () => {
-      document.querySelectorAll('.mode-card').forEach(c => c.classList.remove("selected"));
+      document.querySelectorAll('.role-card').forEach(c => c.classList.remove("selected"));
       card.classList.add("selected");
       card.querySelector('input[type="radio"]').checked = true;
-      document.getElementById("resumeUploadRow").style.display =
-        card.dataset.value === "personalized" ? "flex" : "none";
     });
   });
 
@@ -277,8 +292,13 @@ async function renderInterviewSetupScreen() {
     updateDurationSliderFill(e.target);
   };
 
-  document.getElementById("resumeFile").onchange = async (e) => {
-    const file = e.target.files[0];
+  function showSavedResumeUi(saved) {
+    document.getElementById("resumeSavedRow").style.display = saved ? "flex" : "none";
+    document.getElementById("fileDropLabel").style.display = saved ? "none" : "flex";
+  }
+  showSavedResumeUi(!!(usage && usage.has_resume));
+
+  async function handleResumeFile(file) {
     if (!file) return;
     const statusEl = document.getElementById("resumeStatus");
     const dropText = document.getElementById("fileDropText");
@@ -288,40 +308,57 @@ async function renderInterviewSetupScreen() {
     statusEl.textContent = "Parsing…";
     statusEl.className = "resume-status";
     try {
-      const res = await uploadResume(file);
+      const res = await uploadResume(file); // persists to the account server-side too, see api_parse_resume
       resumeText = res.resume_text;
       statusEl.textContent = `Parsed — ${resumeText.length.toLocaleString()} characters`;
       statusEl.className = "resume-status ok";
+      showSavedResumeUi(true);
     } catch (err) {
       statusEl.textContent = err.message;
       statusEl.className = "resume-status error";
       resumeText = null;
+    }
+  }
+
+  document.getElementById("resumeFile").onchange = (e) => handleResumeFile(e.target.files[0]);
+
+  document.getElementById("resumeUpdateBtn").onclick = () => {
+    showSavedResumeUi(false);
+    document.getElementById("resumeFile").click();
+  };
+
+  document.getElementById("resumeDeleteBtn").onclick = async () => {
+    try {
+      await api("/api/interview/resume", { method: "DELETE" });
+      resumeText = null;
+      usage.has_resume = false;
+      showSavedResumeUi(false);
+      document.getElementById("resumeStatus").textContent = "";
+      document.getElementById("fileDropText").textContent = "Choose a résumé (PDF or DOCX)";
+      document.getElementById("fileDropLabel").classList.remove("has-file");
+    } catch (err) {
+      document.getElementById("resumeStatus").textContent = `Couldn't delete: ${err.message}`;
+      document.getElementById("resumeStatus").className = "resume-status error";
     }
   };
 
   document.getElementById("startInterviewBtn").onclick = async () => {
     const startBtn = document.getElementById("startInterviewBtn");
     if (startBtn.disabled) return; // guard against a double-click firing two overlapping interviews
-    const mode = document.querySelector('input[name="interviewMode"]:checked').value;
+    const targetRole = document.querySelector('input[name="interviewRole"]:checked').value;
     const persona = document.querySelector('input[name="interviewPersona"]:checked').value;
     const skipIntro = document.getElementById("skipIntroCheck").checked;
     const durationMinutes = parseInt(document.getElementById("durationSlider").value, 10);
     const errorEl = document.getElementById("setupError");
     errorEl.style.display = "none";
 
-    if (mode === "personalized" && !resumeText) {
-      errorEl.textContent = "Upload a resume (PDF or DOCX) first, or switch to Generic.";
-      errorEl.style.display = "flex";
-      return;
-    }
-
     startBtn.disabled = true;
     try {
       const res = await api("/api/interview/start", {
         method: "POST",
-        body: JSON.stringify({ mode, persona, resume_text: resumeText, skip_intro: skipIntro, duration_minutes: durationMinutes }),
+        body: JSON.stringify({ target_role: targetRole, persona, resume_text: resumeText, skip_intro: skipIntro, duration_minutes: durationMinutes }),
       });
-      beginLiveInterview(res, mode, resumeText);
+      beginLiveInterview(res, targetRole, resumeText);
     } catch (err) {
       startBtn.disabled = false;
       errorEl.textContent = err.status === 402
@@ -339,20 +376,32 @@ async function renderInterviewSetupScreen() {
   };
 }
 
-function beginLiveInterview(startRes, mode, resumeText) {
+function beginLiveInterview(startRes, targetRole, resumeText) {
+  // Two separate opening turns, no candidate input between them: a
+  // greeting/settle-in/plan monologue (always), then the actual first
+  // question (the "introduce yourself" intro, or a live first question if
+  // skip_intro was set) -- see api_interview_start's opening_monologue.
+  const transcript = [{ role: "assistant", content: startRes.question, topic: startRes.topic }];
+  if (startRes.opening_monologue) {
+    transcript.unshift({ role: "assistant", content: startRes.opening_monologue, topic: null });
+  }
   interviewState = {
     sessionId: startRes.session_id,
-    mode,
+    targetRole,
     resumeText,
     remainingSeconds: startRes.remaining_seconds,
     durationSeconds: startRes.duration_seconds || 45 * 60,
     timerHandle: null,
-    transcript: [{ role: "assistant", content: startRes.question, topic: startRes.topic }],
+    transcript,
     tableContext: startRes.table_context || null,
   };
   setActiveSessionId(startRes.session_id);
   renderLiveInterview();
-  speak(startRes.question);
+  if (startRes.opening_monologue) {
+    speak(startRes.opening_monologue).then(() => speak(startRes.question));
+  } else {
+    speak(startRes.question);
+  }
   startTimer();
 }
 

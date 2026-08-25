@@ -42,6 +42,7 @@ import stt
 import tts
 import db
 import topics
+import role_topics
 import py_topics
 import stats_topics
 import data_lib_topics
@@ -115,8 +116,8 @@ class AskPhoenixRequest(BaseModel):
 
 
 class InterviewStartRequest(BaseModel):
-    mode: str  # "personalized" | "generic"
-    resume_text: str | None = None
+    target_role: str  # one of role_topics.ROLES
+    resume_text: str | None = None  # optional override for this interview; also (re-)saves to the account, same as parse-resume
     skip_intro: bool = False
     duration_minutes: int = 45
     persona: str = "neutral"  # "friendly" | "neutral" | "strict"
@@ -261,6 +262,7 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
         "pro_plan": u["pro_plan"],
         "pro_expires_at": u["pro_expires_at"],
         "pro_auto_renew": u["pro_auto_renew"],
+        "has_resume": u["has_resume"],
     }
 
 
@@ -627,7 +629,8 @@ MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB -- a resume has no business be
 async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
+    if not users_module.is_admin(user_id):
+        _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
 
     file_bytes = await file.read(MAX_RESUME_UPLOAD_BYTES + 1)
     if len(file_bytes) > MAX_RESUME_UPLOAD_BYTES:
@@ -636,38 +639,63 @@ async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header
         text = resume_parser.extract_text(file.filename, file_bytes)
     except resume_parser.UnsupportedResumeFormat as e:
         raise HTTPException(400, str(e))
+    users_module.set_resume(user_id, text)  # persist to the account -- every future interview reuses it until updated/deleted
     return {"resume_text": text}
+
+
+@app.delete("/api/interview/resume")
+def api_delete_resume(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    users_module.delete_resume(user_id)
+    return {"deleted": True}
 
 
 @app.post("/api/interview/start")
 def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    is_trial = _require_paid_or_trial(u)
-    if not is_trial and u["interviews_this_month"] >= MAX_INTERVIEWS_PER_MONTH:
-        raise HTTPException(
-            402,
-            f"You've used all {MAX_INTERVIEWS_PER_MONTH} mock interviews included this month. "
-            "They reset at the start of next month.",
-        )
+    is_unrestricted = users_module.is_admin(user_id)  # admins skip the trial gate, the monthly cap, and all usage bookkeeping below
+    is_trial = False
+    if not is_unrestricted:
+        is_trial = _require_paid_or_trial(u)
+        if not is_trial and u["interviews_this_month"] >= MAX_INTERVIEWS_PER_MONTH:
+            raise HTTPException(
+                402,
+                f"You've used all {MAX_INTERVIEWS_PER_MONTH} mock interviews included this month. "
+                "They reset at the start of next month.",
+            )
 
-    if req.mode not in ("personalized", "generic"):
-        raise HTTPException(400, "mode must be 'personalized' or 'generic'")
-    if req.mode == "personalized" and not req.resume_text:
-        raise HTTPException(400, "resume_text is required for a personalized interview")
+    if req.target_role not in role_topics.ROLES:
+        raise HTTPException(400, f"target_role must be one of {role_topics.ROLES}")
     if req.persona not in ("friendly", "neutral", "strict"):
         raise HTTPException(400, "persona must be 'friendly', 'neutral', or 'strict'")
 
+    # An explicit resume_text here (re-)saves to the account, same as
+    # parse-resume -- uploading/passing a resume is how "update" works, no
+    # separate endpoint needed. Otherwise fall back to whatever's already
+    # saved, so once uploaded a candidate never needs to re-upload.
+    resume_text = req.resume_text
+    if resume_text:
+        users_module.set_resume(user_id, resume_text)
+    else:
+        resume_text = users_module.get_resume(user_id)
+
+    topics_list = role_topics.topics_for_role(req.target_role)
+    profile = llm.analyze_candidate_profile(user_id=user_id, resume_text=resume_text, target_role=req.target_role)
+
     session = interview.create_session(
         user_id=user_id,
-        mode=req.mode,
-        resume_text=req.resume_text,
+        target_role=req.target_role,
+        resume_text=resume_text,
         skip_intro=req.skip_intro,
         duration_seconds=req.duration_minutes * 60,
         is_trial=is_trial,
         persona=req.persona,
+        candidate_profile=profile,
     )
-    if is_trial:
+    if is_unrestricted:
+        pass  # no trial/count bookkeeping at all for admins
+    elif is_trial:
         # Mark the trial used now, at session creation, not at completion --
         # otherwise an abandoned-and-restarted interview would let a free
         # user get multiple trials for the cost of one.
@@ -675,14 +703,23 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
     else:
         users_module.increment_interview_count(user_id)
 
+    # Turn 1: greeting/settle-in/plan monologue, always -- independent of
+    # skip_intro, which only controls whether the SEPARATE "introduce
+    # yourself" question (turn 2) is asked or skipped in favor of a live
+    # first real question. No candidate input happens between turns 1 and 2.
+    opening_monologue = llm.build_opening_monologue(target_role=req.target_role, profile=profile, persona=session["persona"])
+    interview.record_turn(session, "assistant", opening_monologue, None)
+
     if req.skip_intro:
         try:
             result = llm.interview_turn(
                 user_id=user_id,
-                topics=interview.GENERIC_TOPICS,
-                resume_text=req.resume_text,
+                topics=topics_list,
+                resume_text=resume_text,
                 conversation=[],
                 persona=session["persona"],
+                target_role=req.target_role,
+                candidate_profile=profile,
             )
         except Exception as e:
             raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
@@ -696,6 +733,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
 
     return {
         "session_id": session["session_id"],
+        "opening_monologue": opening_monologue,
         "question": question,
         "topic": topic,
         "action": action,
@@ -719,7 +757,8 @@ async def api_interview_stt(file: UploadFile = File(...), x_user_id: str = Heade
     """
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
+    if not users_module.is_admin(user_id):
+        _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
 
     audio_bytes = await file.read(MAX_AUDIO_UPLOAD_BYTES + 1)
     if len(audio_bytes) > MAX_AUDIO_UPLOAD_BYTES:
@@ -743,7 +782,8 @@ def api_interview_tts(req: InterviewTtsRequest, x_user_id: str = Header(default=
     """
     user_id = auth.resolve_user_id(authorization, x_user_id)
     u = users_module.get_usage(user_id)
-    _require_paid_or_trial(u)
+    if not users_module.is_admin(user_id):
+        _require_paid_or_trial(u)
 
     text = req.text.strip()
     if not text:
@@ -783,8 +823,13 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             "remaining_seconds": 0,
         }
 
+    # session["target_role"] can be missing/None only for an interview that
+    # was already in progress at the exact moment this migration deployed --
+    # falls back to Data Analyst's topic set rather than a hard crash for
+    # that narrow window.
+    topics_list = role_topics.topics_for_role(session.get("target_role") or "Data Analyst")
     forced_topic = (
-        interview.next_topic(session, interview.GENERIC_TOPICS)
+        interview.next_topic(session, topics_list)
         if interview.topic_cap_reached(session)
         else None
     )
@@ -792,13 +837,15 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
     try:
         result = llm.interview_turn(
             user_id=user_id,
-            topics=interview.GENERIC_TOPICS,
+            topics=topics_list,
             resume_text=session["resume_text"],
             conversation=session["conversation"],
             current_topic=session["current_topic"],
             topic_turn_count=session["current_topic_turns"],
             forced_topic=forced_topic,
             persona=session["persona"],
+            target_role=session.get("target_role") or "Data Analyst",
+            candidate_profile=session.get("candidate_profile"),
         )
         if result.get("candidate_stuck") and result["action"] != "switch_topic":
             # A real interviewer moves on after ONE clear "I don't know" --
@@ -808,13 +855,15 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             # non-answer.
             result = llm.interview_turn(
                 user_id=user_id,
-                topics=interview.GENERIC_TOPICS,
+                topics=topics_list,
                 resume_text=session["resume_text"],
                 conversation=session["conversation"],
                 current_topic=session["current_topic"],
                 topic_turn_count=session["current_topic_turns"],
-                forced_topic=interview.next_topic(session, interview.GENERIC_TOPICS),
+                forced_topic=interview.next_topic(session, topics_list),
                 persona=session["persona"],
+                target_role=session.get("target_role") or "Data Analyst",
+                candidate_profile=session.get("candidate_profile"),
             )
     except Exception as e:
         # Roll back the user turn we just recorded so a client retry after a
@@ -853,7 +902,7 @@ def api_interview_resume(session_id: str, x_user_id: str = Header(default=None),
     question_turn = interview.last_question(session)
     return {
         "session_id": session["session_id"],
-        "mode": session["mode"],
+        "target_role": session.get("target_role"),
         "persona": session["persona"],
         "ended": session["ended"],
         "feedback": session["feedback"],

@@ -937,6 +937,56 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .mode-card-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
 .mode-card-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
+/* Target-role selector -- same card/selected/checkmark treatment as
+   .mode-card (now retired), just a wider grid for 5 options. */
+.role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.role-card {
+  position: relative;
+  border: 1px solid var(--studio-border);
+  background: var(--studio-panel-2);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.role-card input { position: absolute; opacity: 0; pointer-events: none; }
+.role-card:hover { border-color: #3a4152; }
+.role-card.selected {
+  border-color: var(--gold);
+  background: linear-gradient(160deg, rgba(240,184,110,0.09), rgba(253,160,133,0.04));
+}
+.role-card.selected::after {
+  content: "✓";
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  color: #14171f;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.role-card-icon { font-size: 20px; margin-bottom: 8px; }
+.role-card-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.role-card-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+#resumeSavedRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.resume-manage-btn {
+  font-size: 12px;
+  background: var(--studio-panel-2);
+  border: 1px solid var(--studio-border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.resume-manage-btn:hover { border-color: #3a4152; }
+
 .persona-chips { display: flex; gap: 8px; margin-top: 8px; }
 .persona-chip {
   flex: 1;
@@ -1416,6 +1466,7 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
 @media (max-width: 640px) {
   .mode-cards { grid-template-columns: 1fr; }
+  .role-cards { grid-template-columns: 1fr; }
   .feedback-cols { grid-template-columns: 1fr; }
   .feedback-header { flex-direction: column; align-items: flex-start; gap: 10px; }
   .interview-setup, .interview-live, .feedback-report { padding-left: 16px; padding-right: 16px; }

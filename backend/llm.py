@@ -22,6 +22,7 @@ import requests
 import sandbox
 
 import topics
+import role_topics
 
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
@@ -310,6 +311,109 @@ PERSONA_TONE = {
 }
 
 
+def analyze_candidate_profile(*, user_id: str, resume_text: str | None, target_role: str, topic_history: dict | None = None) -> dict:
+    """
+    [Profile Analyzer] One-time call at /api/interview/start -- replaces the
+    old per-turn silent-inference block in _interview_system_prompt (expensive
+    and unreliable to redo identically every single turn) with a single
+    structured result cached on the session for the interview's whole
+    lifetime.
+
+    When resume_text is None, skips the LLM call entirely and returns a
+    generic default profile -- no wasted call on the common no-resume path.
+    Never raises: any failure (network, malformed JSON) degrades to the same
+    generic default rather than blocking the interview from starting at all,
+    since this is a personalization enhancement, not the interview itself.
+
+    Returns {"domain": str, "seniority": "junior"|"mid"|"senior",
+    "key_skills": [str], "recommended_topics": [str, subset of
+    role_topics.topics_for_role(target_role)], "opening_note": str}.
+    """
+    all_topics = role_topics.topics_for_role(target_role)
+    default_profile = {
+        "domain": "general",
+        "seniority": "mid",
+        "key_skills": [],
+        "recommended_topics": all_topics[:7],
+        "opening_note": f"Today we'll cover a mix of topics relevant to a {target_role} role.",
+    }
+    if not resume_text:
+        return default_profile
+
+    history_block = ""
+    if topic_history:
+        weak = ", ".join(topic_history.keys())
+        history_block = (
+            f"\n\nThis candidate has interviewed before. Their weakest recent "
+            f"topics were: {weak}. Weight recommended_topics toward "
+            "rechecking those alongside covering new ground."
+        )
+
+    system_prompt = (
+        "You are analyzing a candidate's resume ahead of a mock interview "
+        f"for a {target_role} role. Extract a structured profile from the "
+        "resume text below. Be concise and concrete -- this feeds directly "
+        "into how the interview questions get framed.\n\n"
+        f"Candidate's resume:\n{resume_text[:4000]}"
+        f"{history_block}\n\n"
+        "Respond with ONLY a JSON object, no other text, no markdown code "
+        'fences: {"domain": "<apparent industry/domain, e.g. e-commerce, '
+        "fintech, marketing, logistics, healthcare, SaaS, or 'general' if "
+        'unclear>", "seniority": "junior"|"mid"|"senior", "key_skills": '
+        '["<tool/technique strings pulled from the resume, e.g. dbt, '
+        'Tableau, Python>"], "recommended_topics": ["<5-8 topics from this '
+        f"exact list, ordered by relevance: {', '.join(all_topics)}>\"], "
+        '"opening_note": "<one short sentence naming what this interview '
+        "will focus on and why, e.g. 'Since you've spent two years on "
+        "marketing analytics, we'll lean into metric design and SQL "
+        'reporting.\' -- spoken verbatim in the opening, so keep it natural>"}'
+    )
+    try:
+        result = _call_chat_with_retry(
+            user_id=user_id, problem_id="mock-interview-profile",
+            messages=[{"role": "system", "content": system_prompt}],
+            max_tokens=500, json_mode=True,
+        )
+        parsed = _parse_json_reply(result["reply"])
+        recommended = [t for t in parsed.get("recommended_topics", []) if t in all_topics]
+        seniority = parsed.get("seniority")
+        return {
+            "domain": parsed.get("domain") or "general",
+            "seniority": seniority if seniority in ("junior", "mid", "senior") else "mid",
+            "key_skills": [s for s in parsed.get("key_skills", []) if isinstance(s, str)],
+            "recommended_topics": recommended or all_topics[:7],
+            "opening_note": parsed.get("opening_note") or default_profile["opening_note"],
+        }
+    except Exception:
+        return default_profile
+
+
+def build_opening_monologue(*, target_role: str, profile: dict, persona: str) -> str:
+    """
+    [Interviewer] Static, role-templated opening -- greeting, settle-in,
+    explain-it's-practice, and a short plan -- built from the profile
+    analyzer's output rather than a separate LLM call. Mirrors why
+    INTRO_QUESTION (main.py) is a plain constant today: the very first
+    thing a candidate hears shouldn't depend on an LLM round-trip or vary
+    unpredictably in tone/length -- only the plan sentence varies, and
+    that's already produced cheaply by analyze_candidate_profile's
+    opening_note, no extra LLM call needed here.
+
+    This is always turn 1, spoken before -- and independently of --
+    whichever question actually opens the interview proper (the hardcoded
+    "introduce yourself" question, or a live-generated first question when
+    skip_intro is set).
+    """
+    return (
+        f"Hi, thanks for joining -- welcome to your practice interview for "
+        f"a {target_role} role. Take a breath, there's no pressure here -- "
+        "this is just practice, so treat any stumble as useful information, "
+        f"not a verdict. {profile.get('opening_note', '')} We'll go through "
+        "a few areas, and I'll follow up where it's useful. Whenever you're "
+        "ready, let's get started."
+    )
+
+
 def _interview_system_prompt(
     topics: list[str],
     resume_text: str | None,
@@ -318,9 +422,48 @@ def _interview_system_prompt(
     max_turns_per_topic: int = 3,
     forced_topic: str | None = None,
     persona: str = "neutral",
+    target_role: str = "Data Analyst",
+    candidate_profile: dict | None = None,
 ) -> str:
+    # [Profile Analyzer output consumed here] candidate_profile is computed
+    # ONCE at /api/interview/start by analyze_candidate_profile() -- domain/
+    # seniority/key_skills are stated directly rather than re-derived from
+    # raw resume text every single turn (expensive to redo, and unreliable
+    # to ask the model to silently re-infer identically turn after turn).
+    # Falls back to the old raw-resume-dump behavior only if no profile was
+    # computed (shouldn't happen in normal operation post-Phase-1, but
+    # cheap insurance against a missing profile rather than a hard crash).
     resume_block = ""
-    if resume_text:
+    if candidate_profile:
+        key_skills = ", ".join(candidate_profile.get("key_skills") or []) or "none specifically mentioned"
+        resume_block = (
+            "The candidate's profile has already been analyzed once -- trust "
+            f"this, do not re-derive it yourself: domain/industry: "
+            f"{candidate_profile.get('domain', 'general')}; apparent "
+            f"seniority: {candidate_profile.get('seniority', 'mid')}; key "
+            f"skills/tools mentioned: {key_skills}. Apply this mechanically, "
+            "every question:\n"
+            "- Every invented table_context (schema, sample rows, the "
+            "scenario in your question) must be grounded in their actual "
+            "domain -- an e-commerce background gets orders/customers/"
+            "products tables, a marketing background gets campaigns/"
+            "impressions/conversions, and so on. Never fall back to "
+            "generic/unrelated placeholder tables (e.g. a plain "
+            "'employees' or 'students' table) when the profile gives you a "
+            "real domain to work with.\n"
+            "- Calibrate difficulty to their seniority: junior/entry-level "
+            "gets more foundational questions with follow_up used to build "
+            "up gradually; senior gets harder opening questions and more "
+            "probe (edge cases, performance, trade-offs) rather than "
+            "hand-holding.\n"
+            "- When natural, reference a concrete specific (a tool, project "
+            "type, or their domain) in your acknowledgment or question "
+            "framing -- not a vague nod like 'given your background'.\n"
+            "Still cover the topics below regardless of domain -- this "
+            "shapes the scenarios and difficulty, not which topics are in "
+            "scope. Don't just ask about their resume verbatim.\n\n"
+        )
+    elif resume_text:
         resume_block = (
             "The candidate's resume/background is below. Before your first "
             "question, work out silently (do not narrate this): (1) their "
@@ -348,9 +491,9 @@ def _interview_system_prompt(
             "(a tool, project type, or prior company's domain) in your "
             "acknowledgment or question framing -- not a vague nod like "
             "'given your background'.\n"
-            "Still cover core SQL fundamentals regardless of domain -- "
-            "this shapes the scenarios and difficulty, not which SQL "
-            "concepts are in scope. Don't just ask about their resume "
+            "Still cover the topics below regardless of domain -- "
+            "this shapes the scenarios and difficulty, not which "
+            "topics are in scope. Don't just ask about their resume "
             "verbatim.\n\n"
             f"{resume_text[:4000]}\n\n"
         )
@@ -382,10 +525,24 @@ def _interview_system_prompt(
             "choosing follow_up/probe vs switch_topic.\n\n"
         )
 
+    conceptual_in_scope = [t for t in topics if role_topics.is_conceptual(t)]
+    conceptual_note = ""
+    if conceptual_in_scope:
+        conceptual_note = (
+            "The following topics from the list below are conceptual/"
+            f"business-discussion topics, not SQL query-technique topics: "
+            f"{', '.join(conceptual_in_scope)}. Whenever the current or "
+            "newly-chosen topic is one of these, do NOT invent a "
+            "table_context -- set table_context to null always for these, "
+            "and if the scenario needs supporting numbers (e.g. a metric "
+            "dropped 15% last quarter), state them directly in the spoken "
+            "question instead of a table.\n\n"
+        )
+
     return (
-        "You are conducting a live, spoken SQL technical interview for a "
-        "candidate applying to a data/analytics role. Ask ONE "
-        "question at a time, in natural spoken language -- no markdown, no "
+        f"You are conducting a live, spoken interview for a candidate "
+        f"applying to a {target_role} role. Ask ONE question at a time, in "
+        "natural spoken language -- no markdown, no "
         "bullet points, no code blocks, since your question will be read "
         "aloud by text-to-speech. Keep each question to 1-3 sentences.\n\n"
         "Maintain a gentle, calm, patient demeanor throughout, regardless "
@@ -432,6 +589,7 @@ def _interview_system_prompt(
         f"{PERSONA_TONE.get(persona, '')}"
         f"{resume_block}"
         f"{topic_budget_block}"
+        f"{conceptual_note}"
         f"Topics to cover across the interview: {', '.join(topics)}.\n\n"
         "The `topic` field in your JSON response MUST be exactly one of "
         "those topic names (exact spelling), never an invented or "
@@ -447,15 +605,16 @@ def _interview_system_prompt(
         "is to move onto one of those. On follow_up/probe on a real topic, "
         "reuse the SAME topic string you (or the topic_budget note above) "
         "were already given for the current topic.\n\n"
-        "Whenever your question refers to a table (e.g. 'suppose you have a "
-        "table called orders...'), you MUST invent a concrete schema and a "
-        "handful of sample rows for it, and put them in `table_context` -- "
-        "never leave the candidate to imagine column names or data on their "
-        "own, they need to actually see it on screen. Reuse the SAME table "
-        "(set table_context to null) for follow_up or probe questions still "
-        "about that table; only invent a new table_context when you "
-        "switch_topic to a scenario that needs a different table, or for "
-        "the very first question.\n\n"
+        "For SQL query-technique topics (not the conceptual topics noted "
+        "above, if any): whenever your question refers to a table (e.g. "
+        "'suppose you have a table called orders...'), you MUST invent a "
+        "concrete schema and a handful of sample rows for it, and put them "
+        "in `table_context` -- never leave the candidate to imagine column "
+        "names or data on their own, they need to actually see it on "
+        "screen. Reuse the SAME table (set table_context to null) for "
+        "follow_up or probe questions still about that table; only invent "
+        "a new table_context when you switch_topic to a scenario that "
+        "needs a different table, or for the very first question.\n\n"
         "After the candidate's most recent answer, decide exactly one of:\n"
         "- follow_up: there is a specific gap, vagueness, or mistake in "
         "their answer -- ask a targeted follow-up on the SAME topic to "
@@ -471,9 +630,10 @@ def _interview_system_prompt(
         "below) -- a real interviewer moves on right away after someone "
         "gives up, they don't ask the same thing again. Move to a new "
         "topic from the list above that has not been covered yet.\n\n"
-        "Only ask about SQL, databases, and data engineering concepts. If "
-        "the candidate goes off-topic, gently redirect back to the "
-        "interview.\n\n"
+        "Only ask about topics from the list above -- SQL/database concepts "
+        f"and the role-relevant analytical/business concepts appropriate to "
+        f"a {target_role} interview. If the candidate goes off-topic, "
+        "gently redirect back to the interview.\n\n"
         "The candidate's answers come from speech-to-text, which can "
         "occasionally produce actual gibberish (word salad, mid-word cuts, "
         "sounds transcribed as random unrelated words). A short-but-coherent "
@@ -991,6 +1151,8 @@ def interview_turn(
     topic_turn_count: int = 0,
     forced_topic: str | None = None,
     persona: str = "neutral",
+    target_role: str = "Data Analyst",
+    candidate_profile: dict | None = None,
 ) -> dict:
     """
     Decides the next interview question. `conversation` is the full turn
@@ -1010,6 +1172,7 @@ def interview_turn(
     """
     messages = [{"role": "system", "content": _interview_system_prompt(
         topics, resume_text, current_topic, topic_turn_count, forced_topic=forced_topic, persona=persona,
+        target_role=target_role, candidate_profile=candidate_profile,
     )}]
     if conversation:
         # Chat APIs only accept {role, content} -- strip our extra "topic" bookkeeping field.

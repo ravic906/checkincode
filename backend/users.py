@@ -38,6 +38,7 @@ def _row_to_usage(row: dict) -> dict:
         "pro_plan": row.get("pro_plan"),
         "pro_expires_at": row["pro_expires_at"].isoformat() if row.get("pro_expires_at") else None,
         "pro_auto_renew": row.get("pro_auto_renew", True),
+        "has_resume": bool(row.get("resume_text")),
     }
 
 
@@ -100,6 +101,39 @@ def get_usage(user_id: str) -> dict:
                     )
                     row = cur.fetchone()
             return _row_to_usage(row)
+
+
+def get_resume(user_id: str) -> str | None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT resume_text FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def set_resume(user_id: str, resume_text: str) -> None:
+    """Upserts so this works even if the target has never hit any other
+    endpoint yet (same pattern as set_admin) -- persists the resume to the
+    account so future interviews can reuse it without a re-upload. Called
+    by the same parse-resume endpoint that used to only return the parsed
+    text for one-off use; uploading is how "update" works, no separate
+    endpoint needed."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (id, tier, usage_date, submissions_today, explanations_today, resume_text)
+                VALUES (%s, 'free', %s, 0, 0, %s)
+                ON CONFLICT (id) DO UPDATE SET resume_text = EXCLUDED.resume_text
+                """,
+                (user_id, _today(), resume_text),
+            )
+
+
+def delete_resume(user_id: str) -> None:
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET resume_text = NULL WHERE id = %s", (user_id,))
 
 
 def increment_submission(user_id: str):

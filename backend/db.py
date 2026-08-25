@@ -77,6 +77,16 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS persona TEXT NOT NULL DEFAULT 'neutral'
             """)
+            # Migration: role-based interviewing replaced the old fixed
+            # SQL-only topic list -- `mode` (personalized/generic) stays in
+            # place, unused, rather than a destructive drop; target_role and
+            # the once-computed candidate_profile are the real replacements.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS target_role TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS candidate_profile JSONB
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
                     id TEXT PRIMARY KEY,
@@ -227,6 +237,13 @@ def init_schema():
             """)
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_auto_renew BOOLEAN NOT NULL DEFAULT TRUE
+            """)
+            # Migration: resume moved from per-interview-session-only
+            # (interview_sessions.resume_text, re-uploaded every time) to a
+            # persistent per-account asset -- upload once, every future
+            # interview reuses it automatically until updated or deleted.
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_text TEXT
             """)
             # Additional, hidden, adversarially-constructed seed datasets for
             # SQL problems -- problems.seed_sql stays test case #1 (the one
