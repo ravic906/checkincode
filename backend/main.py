@@ -26,7 +26,7 @@ import hmac
 import os
 import re
 
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File, Form
+from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -39,6 +39,7 @@ import llm
 import interview
 import resume_parser
 import stt
+import tts
 import db
 import topics
 import py_topics
@@ -128,6 +129,10 @@ class InterviewAnswerRequest(BaseModel):
 
 class InterviewEndRequest(BaseModel):
     session_id: str
+
+
+class InterviewTtsRequest(BaseModel):
+    text: str
 
 
 @app.get("/api/topics")
@@ -724,6 +729,35 @@ async def api_interview_stt(file: UploadFile = File(...), x_user_id: str = Heade
     except RuntimeError as e:
         raise HTTPException(502, f"Voice transcription unavailable right now ({e}).")
     return {"text": text}
+
+
+MAX_TTS_CHARS = 2000  # generously covers even a long interviewer turn -- no legitimate question/monologue should exceed this
+
+
+@app.post("/api/interview/tts")
+def api_interview_tts(req: InterviewTtsRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Synthesizes one interviewer line to speech. Same gate as the rest of
+    the interview (Pro tier or the one free trial) -- see api_interview_stt's
+    docstring for why no separate quota is needed.
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
+    _require_paid_or_trial(u)
+
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(400, "text must not be empty.")
+    if len(text) > MAX_TTS_CHARS:
+        raise HTTPException(413, "Text too long to synthesize.")
+
+    try:
+        audio_bytes = tts.synthesize(text)
+    except RuntimeError as e:
+        raise HTTPException(502, f"Voice synthesis unavailable right now ({e}).")
+
+    llm._log_usage({"user_id": user_id, "problem_id": "mock-interview-tts", "model": tts.TTS_MODEL, "characters": len(text)})
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 @app.post("/api/interview/answer")

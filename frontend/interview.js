@@ -1,13 +1,14 @@
 /*
- * Mock voice interview. Text-to-speech still runs entirely in the browser
- * via the Web Speech API. Speech-to-text records the candidate's full
- * answer with the browser's MediaRecorder API and sends it to
- * POST /api/interview/stt (Fireworks-hosted Whisper -- see backend/stt.py)
- * for transcription, rather than using the browser's own (accent-fragile,
- * inconsistent-across-browsers) SpeechRecognition. Either way, the backend
- * interview orchestration only ever sees plain text in and out -- swapping
- * the STT provider again later (e.g. back to Groq Whisper) is a backend
- * env-var change, not a frontend rewrite.
+ * Mock voice interview. Text-to-speech goes through POST /api/interview/tts
+ * (see backend/tts.py) for a natural interviewer voice, falling back to the
+ * browser's own flat-sounding Web Speech API only if that call fails.
+ * Speech-to-text records the candidate's full answer with the browser's
+ * MediaRecorder API and sends it to POST /api/interview/stt (see
+ * backend/stt.py) for transcription, rather than using the browser's own
+ * (accent-fragile, inconsistent-across-browsers) SpeechRecognition. Either
+ * way, the backend interview orchestration only ever sees plain text in and
+ * out -- swapping either provider later is a backend env-var change, not a
+ * frontend rewrite.
  */
 
 let interviewState = null; // { sessionId, resumeText, mode, remainingSeconds, timerHandle, transcript: [{role, content, topic}] }
@@ -473,7 +474,52 @@ function startTimer() {
 let currentUtterance = null;
 let speechKeepAliveTimer = null;
 
+// Natural interviewer voice via POST /api/interview/tts (see backend/tts.py)
+// instead of the browser's flat, robotic-sounding Web Speech API. Falls back
+// to the old browser-TTS path on any failure (network blip, quota, provider
+// outage) -- voice quality is a nice-to-have, the interview must still be
+// usable if the new call fails.
+let currentAudio = null;
+
 function speak(text) {
+  return speakViaApi(text).catch(() => speakViaBrowser(text));
+}
+
+function speakViaApi(text) {
+  return fetch(`${API_BASE}/api/interview/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-User-Id": USER_ID },
+    body: JSON.stringify({ text }),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`TTS failed (${res.status})`);
+      return res.blob();
+    })
+    .then((blob) => new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+      };
+      audio.onended = () => { cleanup(); resolve(); };
+      audio.onerror = () => { cleanup(); reject(new Error("Audio playback failed")); };
+      audio.play().catch((e) => { cleanup(); reject(e); });
+    }));
+}
+
+function stopSpeaking() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  window.speechSynthesis?.cancel();
+  clearInterval(speechKeepAliveTimer);
+  currentUtterance = null;
+}
+
+function speakViaBrowser(text) {
   return new Promise((resolve) => {
     if (!speechSynthesisSupported) { resolve(); return; }
 
@@ -635,7 +681,7 @@ async function submitAnswer(answerText) {
 async function endInterview() {
   if (!interviewState) return;
   if (interviewState.timerHandle) clearInterval(interviewState.timerHandle);
-  window.speechSynthesis?.cancel();
+  stopSpeaking();
   stopListening({ skipSubmit: true });
 
   const screen = document.getElementById("interviewScreen");
@@ -729,9 +775,7 @@ async function renderFeedback(report) {
 
 window.renderInterviewSetup = renderInterviewEntry;
 window.stopInterviewAudio = () => {
-  window.speechSynthesis?.cancel();
-  clearInterval(speechKeepAliveTimer);
-  currentUtterance = null;
+  stopSpeaking();
   stopListening({ skipSubmit: true });
   if (interviewState && interviewState.timerHandle) clearInterval(interviewState.timerHandle);
 };
