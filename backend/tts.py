@@ -18,7 +18,7 @@ import requests
 TTS_API_BASE = os.environ.get("TTS_API_BASE", "https://api.openai.com/v1")
 TTS_API_KEY = os.environ.get("TTS_API_KEY", "")
 TTS_MODEL = os.environ.get("TTS_MODEL", "tts-1")
-TTS_VOICE = os.environ.get("TTS_VOICE", "shimmer")
+TTS_VOICE = os.environ.get("TTS_VOICE", "sage")  # calm, steady pacing -- matches the interviewer prompt's own emphasis on a patient, unhurried demeanor
 
 
 def synthesize(text: str) -> bytes:
