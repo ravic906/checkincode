@@ -810,31 +810,88 @@ const LEVEL_META = {
   advanced: { icon: "●", label: "Advanced" },
 };
 
-let gradeableTopicsPromise = null;
-function loadGradeableTopics() {
-  // Lazy + cached -- only the feedback screen needs this, and it never
-  // changes within a session.
-  if (!gradeableTopicsPromise) {
-    gradeableTopicsPromise = api("/api/topics").then(r => new Set(r.gradeable)).catch(() => new Set());
+let topicTrackMapPromise = null;
+// Maps a topic name -> which practice-problem track it lives in ("sql" or
+// "case"; python topics never appear in the interview's blended taxonomy,
+// see role_topics.py), so a feedback pill/next-practice-plan entry knows
+// which track to switch to. Lazy + cached -- only the feedback screen
+// needs this, and it never changes within a session.
+function loadTopicTrackMap() {
+  if (!topicTrackMapPromise) {
+    topicTrackMapPromise = api("/api/topics").then(r => {
+      const map = new Map();
+      (r.gradeable || []).forEach(t => map.set(t, "sql"));
+      (r.case_da || []).forEach(t => map.set(t, "case"));
+      (r.case_de || []).forEach(t => map.set(t, "case"));
+      return map;
+    }).catch(() => new Map());
   }
-  return gradeableTopicsPromise;
+  return topicTrackMapPromise;
 }
 
 async function renderFeedback(report) {
   const screen = document.getElementById("interviewScreen");
   const level = LEVEL_META[report.rough_level] || LEVEL_META.intermediate;
-  const gradeableTopics = await loadGradeableTopics();
+  const topicTrack = await loadTopicTrackMap();
 
   const scoreHtml = typeof report.score === "number"
     ? `<div class="feedback-score">${report.score}<span>/100</span></div>`
     : "";
 
   const pillsHtml = (report.topics_to_study || []).map(t => {
-    if (gradeableTopics.has(t)) {
-      return `<button class="topic-pill topic-pill-link" data-topic="${escapeHtml(t)}">${escapeHtml(t)} →</button>`;
+    if (topicTrack.has(t)) {
+      return `<button class="topic-pill topic-pill-link" data-topic="${escapeHtml(t)}" data-track="${topicTrack.get(t)}">${escapeHtml(t)} →</button>`;
     }
     return `<span class="topic-pill topic-pill-inert" title="No practice problems for this topic yet -- ask about it via Ask Phoenix from any practice problem.">${escapeHtml(t)}</span>`;
   }).join("") || "—";
+
+  const trendHtml = report.trend_note
+    ? `<p class="feedback-trend-note">📈 ${escapeHtml(report.trend_note)}</p>`
+    : "";
+
+  const topicScoresHtml = (report.topic_scores || []).length
+    ? `
+      <h3 class="feedback-section-title">Topic-wise Scores</h3>
+      <div class="feedback-topic-scores">
+        ${report.topic_scores.map(ts => `
+          <div class="topic-score-row">
+            <span class="topic-score-name">${escapeHtml(ts.topic)}</span>
+            <div class="topic-score-bar-track"><div class="topic-score-bar-fill" style="width:${Math.max(0, Math.min(100, ts.score))}%"></div></div>
+            <span class="topic-score-value">${ts.score}</span>
+            ${ts.note ? `<span class="topic-score-note">${escapeHtml(ts.note)}</span>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    `
+    : "";
+
+  const questionNotesHtml = (report.question_notes || []).length
+    ? `
+      <h3 class="feedback-section-title">Question-by-Question Notes</h3>
+      <div class="feedback-question-notes">
+        ${report.question_notes.map(q => `
+          <div class="question-note-card">
+            <div class="question-note-q">${escapeHtml(q.question || "")}</div>
+            ${q.topic ? `<span class="chat-topic">${escapeHtml(q.topic)}</span>` : ""}
+            ${q.candidate_answer_summary ? `<p class="question-note-answer"><strong>You said:</strong> ${escapeHtml(q.candidate_answer_summary)}</p>` : ""}
+            ${q.assessment ? `<p class="question-note-assessment">${escapeHtml(q.assessment)}</p>` : ""}
+            ${q.better_sample_answer ? `<p class="question-note-sample"><strong>A strong answer:</strong> ${escapeHtml(q.better_sample_answer)}</p>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    `
+    : "";
+
+  const practicePlanHtml = (report.next_practice_plan || []).length
+    ? `
+      <h3 class="feedback-section-title">Next Practice Plan</h3>
+      <div class="topic-pills">
+        ${report.next_practice_plan.map(p => `
+          <button class="topic-pill topic-pill-link" data-topic="${escapeHtml(p.topic)}" data-track="${escapeHtml(p.track || "sql")}" title="${escapeHtml(p.reason || "")}">${escapeHtml(p.topic)} →</button>
+        `).join("")}
+      </div>
+    `
+    : "";
 
   screen.innerHTML = `
     <div class="feedback-report">
@@ -849,6 +906,7 @@ async function renderFeedback(report) {
         </div>
       </div>
       <p class="feedback-summary">${escapeHtml(report.overall_summary || "")}</p>
+      ${trendHtml}
 
       <div class="feedback-cols">
         <div class="feedback-col strengths">
@@ -861,15 +919,20 @@ async function renderFeedback(report) {
         </div>
       </div>
 
+      ${topicScoresHtml}
+
       <h3 class="feedback-section-title">Topics to Study</h3>
       <div class="topic-pills">${pillsHtml}</div>
+
+      ${practicePlanHtml}
+      ${questionNotesHtml}
 
       <button class="submit-btn" id="backHomeBtn">Back to home</button>
     </div>
   `;
   document.getElementById("backHomeBtn").onclick = showHome;
   document.querySelectorAll(".topic-pill-link").forEach(btn => {
-    btn.onclick = () => window.filterProblemsByTopic(btn.dataset.topic);
+    btn.onclick = () => window.filterProblemsByTopic(btn.dataset.topic, btn.dataset.track);
   });
 }
 

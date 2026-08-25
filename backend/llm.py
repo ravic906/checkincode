@@ -338,6 +338,20 @@ def analyze_candidate_profile(*, user_id: str, resume_text: str | None, target_r
         "opening_note": f"Today we'll cover a mix of topics relevant to a {target_role} role.",
     }
     if not resume_text:
+        if topic_history:
+            # No resume, but a returning candidate -- weight
+            # recommended_topics toward their weakest recent average score
+            # with a cheap sort, no LLM call needed for this simple case
+            # (topics with no history sort as if perfect, so they fill in
+            # after genuinely weak ones rather than crowding them out).
+            def _avg_score(topic):
+                entries = topic_history.get(topic, [])
+                return sum(e["score"] for e in entries) / len(entries) if entries else 100
+            default_profile["recommended_topics"] = sorted(all_topics, key=_avg_score)[:7]
+            default_profile["opening_note"] = (
+                "Since you've interviewed before, we'll revisit a few areas "
+                "you found tricky last time, alongside some new ground."
+            )
         return default_profile
 
     history_block = ""
@@ -1233,41 +1247,110 @@ def interview_turn(
         }
 
 
-FEEDBACK_SYSTEM_PROMPT = (
-    "You are an experienced SQL interviewer writing a feedback report after "
-    "a mock interview. Review the full transcript and produce a structured, "
-    "honest but encouraging assessment for the candidate.\n\n"
-    f"topics_to_study MUST only contain values from this exact list (use "
-    f"the exact spelling): {', '.join(topics.ALL_TOPICS)}.\n\n"
-    "Respond with ONLY a JSON object, no other text, no markdown code "
-    'fences: {"overall_summary": "<2-3 sentence overall impression>", '
-    '"score": <integer 0-100, your holistic assessment of interview performance>, '
-    '"strengths": ["<point>", ...], "weaknesses": ["<point>", ...], '
-    '"topics_to_study": ["<topic, from the list above>", ...], '
-    '"rough_level": "beginner"|"intermediate"|"advanced"}'
-)
+def _feedback_system_prompt(target_role: str, topic_history: dict | None = None) -> str:
+    """[Feedback Generator] Builds the feedback-report system prompt,
+    scoped to the role's blended topic list (not the old SQL-only
+    topics.ALL_TOPICS) and, when topic_history is available, grounded in
+    real past scores so trend_note can never be a fabricated comparison."""
+    all_topics = role_topics.topics_for_role(target_role)
+    conceptual = [t for t in all_topics if role_topics.is_conceptual(t)]
+
+    history_block = ""
+    history_lines = []
+    if topic_history:
+        for topic, entries in topic_history.items():
+            if entries:
+                scores = ", ".join(str(e["score"]) for e in entries)
+                history_lines.append(f"- {topic}: past score(s), most recent first: {scores}")
+    if history_lines:
+        history_block = (
+            "\nThis candidate has interviewed before. Their past per-topic "
+            "scores:\n" + "\n".join(history_lines) + "\nWhen a topic in THIS "
+            "interview overlaps with one listed above, set trend_note to a "
+            "short, gentle 1-2 sentence comparison (improved, dipped, or "
+            "held steady) grounded ONLY in these real numbers -- never "
+            "invent or imply a comparison for a topic with no history "
+            "above. If nothing overlaps, set trend_note to null.\n\n"
+        )
+    else:
+        history_block = (
+            "\nThis is this candidate's first recorded interview -- there "
+            "is no prior history to compare against. Set trend_note to "
+            "null; never invent a \"since last time\" comparison.\n\n"
+        )
+
+    return (
+        "You are an experienced interviewer writing a feedback report "
+        f"after a mock interview for a {target_role} role. Review the full "
+        "transcript and produce a structured, honest but encouraging "
+        "assessment for the candidate.\n\n"
+        f"topics_to_study, topic_scores[].topic, question_notes[].topic, "
+        "and next_practice_plan[].topic MUST only contain values from this "
+        f"exact list (use the exact spelling): {', '.join(all_topics)}. "
+        "Only include topics that were actually covered in the transcript "
+        "in topic_scores and question_notes -- never invent scores for a "
+        "topic that was never asked about.\n"
+        f"{history_block}"
+        "For next_practice_plan[].track: use \"case\" for a topic that's "
+        "conceptual/business-discussion rather than a SQL query-technique "
+        f"topic ({', '.join(conceptual) if conceptual else 'none in this role'}), "
+        "otherwise \"sql\".\n\n"
+        "Respond with ONLY a JSON object, no other text, no markdown code "
+        'fences: {"overall_summary": "<2-3 sentence overall impression>", '
+        '"score": <integer 0-100, your holistic assessment of interview performance>, '
+        '"strengths": ["<point>", ...], "weaknesses": ["<point>", ...], '
+        '"topics_to_study": ["<topic, from the list above>", ...], '
+        '"topic_scores": [{"topic": "<topic actually covered>", "score": '
+        '<integer 0-100>, "note": "<1 short sentence>"}], '
+        '"question_notes": [{"question": "<the interviewer\'s question, as '
+        'asked>", "topic": "<topic>", "candidate_answer_summary": "<short '
+        'paraphrase of what they said>", "assessment": "<1-2 sentences>", '
+        '"better_sample_answer": "<a strong model answer to that specific '
+        'question>"}], '
+        '"next_practice_plan": [{"topic": "<topic>", "track": "sql"|"case", '
+        '"reason": "<1 short sentence>"}], '
+        '"trend_note": "<1-2 gentle sentences, or null>", '
+        '"rough_level": "beginner"|"intermediate"|"advanced"}'
+    )
 
 
-def interview_feedback(*, user_id: str, conversation: list[dict]) -> dict:
+def interview_feedback(*, user_id: str, conversation: list[dict], target_role: str = "Data Analyst", topic_history: dict | None = None) -> dict:
     """
     Generates the end-of-interview feedback report from the full transcript.
     Returns {"report": {...parsed fields...}, "usage": {...}}.
     """
     transcript = "\n".join(f"{t['role'].upper()}: {t['content']}" for t in conversation)
     messages = [
-        {"role": "system", "content": FEEDBACK_SYSTEM_PROMPT},
+        {"role": "system", "content": _feedback_system_prompt(target_role, topic_history)},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
-    result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=1200, json_mode=True)
+    result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=2500, json_mode=True)
     try:
         report = _parse_json_reply(result["reply"])
-    except json.JSONDecodeError:
+        # Defensive validation, same "don't fully trust a free-form JSON
+        # reply for fields other code depends on structurally" precedent as
+        # interview_turn's topic normalization -- record_topic_history()
+        # needs every topic_scores entry to be a real topic with a real
+        # score, not whatever the model happened to return.
+        all_topics = role_topics.topics_for_role(target_role)
+        report["topic_scores"] = [
+            t for t in report.get("topic_scores", [])
+            if isinstance(t, dict) and t.get("topic") in all_topics and isinstance(t.get("score"), (int, float))
+        ]
+        report.setdefault("question_notes", [])
+        report.setdefault("next_practice_plan", [])
+        report.setdefault("trend_note", None)
+    except (json.JSONDecodeError, KeyError):
         report = {
             "overall_summary": result["reply"],
             "score": None,
             "strengths": [],
             "weaknesses": [],
             "topics_to_study": [],
+            "topic_scores": [],
+            "question_notes": [],
+            "next_practice_plan": [],
+            "trend_note": None,
             "rough_level": "intermediate",
         }
     return {"report": report, "usage": result["usage"]}

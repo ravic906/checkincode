@@ -214,6 +214,52 @@ def mark_ended(session: dict, feedback: dict):
     save_session(session)
 
 
+def record_topic_history(user_id: str, session_id: str, topic_scores: list[dict]):
+    """
+    [Feedback Generator] One row per topic_scores entry from a just-
+    generated feedback report -- called from /api/interview/end right after
+    mark_ended(). Silently does nothing for an empty list (e.g. a very
+    short/abandoned interview with no scored topics) rather than erroring.
+    """
+    if not topic_scores:
+        return
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO interview_topic_history (user_id, session_id, topic, score) VALUES (%s,%s,%s,%s)",
+                [(user_id, session_id, t["topic"], t["score"]) for t in topic_scores if t.get("topic") is not None],
+            )
+
+
+def get_topic_history(user_id: str, topics: list[str] | None = None, limit_per_topic: int = 5) -> dict[str, list[dict]]:
+    """
+    [Profile Analyzer / Feedback Generator] Recent scores per topic across
+    ALL of a user's past interviews, most recent first -- used to weight a
+    new interview's recommended_topics toward rechecking weak areas, and to
+    ground a feedback report's trend_note in real prior data rather than
+    letting the model fabricate a "since last time" claim. Returns
+    {topic: [{"score": int, "recorded_at": iso str}, ...]}, only for topics
+    that have at least one recorded score (an empty dict means this user
+    has no interview history yet).
+    """
+    query = "SELECT topic, score, recorded_at FROM interview_topic_history WHERE user_id = %s"
+    params: list = [user_id]
+    if topics:
+        query += " AND topic = ANY(%s)"
+        params.append(topics)
+    query += " ORDER BY recorded_at DESC"
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+    history: dict[str, list[dict]] = {}
+    for row in rows:
+        entries = history.setdefault(row["topic"], [])
+        if len(entries) < limit_per_topic:
+            entries.append({"score": row["score"], "recorded_at": row["recorded_at"].isoformat()})
+    return history
+
+
 def topic_cap_reached(session: dict) -> bool:
     limit = MAX_TURNS_INTRO if session["current_topic"] == "intro" else MAX_TURNS_PER_TOPIC
     return session["current_topic_turns"] >= limit

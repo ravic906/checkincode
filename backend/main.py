@@ -682,7 +682,10 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         resume_text = users_module.get_resume(user_id)
 
     topics_list = role_topics.topics_for_role(req.target_role)
-    profile = llm.analyze_candidate_profile(user_id=user_id, resume_text=resume_text, target_role=req.target_role)
+    topic_history = interview.get_topic_history(user_id, topics=topics_list)
+    profile = llm.analyze_candidate_profile(
+        user_id=user_id, resume_text=resume_text, target_role=req.target_role, topic_history=topic_history,
+    )
 
     session = interview.create_session(
         user_id=user_id,
@@ -976,12 +979,22 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
     if session["ended"] and session["feedback"] is not None:
         return {"feedback": session["feedback"], "conversation": session["conversation"]}
 
+    target_role = session.get("target_role") or "Data Analyst"
     if session["feedback"] is None:
+        topics_list = role_topics.topics_for_role(target_role)
+        topic_history = interview.get_topic_history(user_id, topics=topics_list)
         try:
-            result = llm.interview_feedback(user_id=user_id, conversation=session["conversation"])
+            result = llm.interview_feedback(
+                user_id=user_id, conversation=session["conversation"],
+                target_role=target_role, topic_history=topic_history,
+            )
             feedback = result["report"]
         except Exception as e:
             raise HTTPException(502, f"Couldn't generate feedback report right now ({e}).")
+        # Only on freshly-generated feedback -- record_topic_history must
+        # run exactly once per interview, not again on every idempotent
+        # re-call of this endpoint against already-existing feedback.
+        interview.record_topic_history(user_id, session["session_id"], feedback.get("topic_scores", []))
     else:
         feedback = session["feedback"]
 

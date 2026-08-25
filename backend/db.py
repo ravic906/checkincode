@@ -277,6 +277,24 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_problem_test_cases_problem_id
                     ON problem_test_cases (problem_id)
             """)
+            # Cross-interview memory (Phase 4 of the mock interview rebuild)
+            # -- one row per topic per completed interview, so a future
+            # interview's profile analysis and feedback can reference real
+            # growth/dips over time instead of only the current transcript.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS interview_topic_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL REFERENCES interview_sessions(session_id) ON DELETE CASCADE,
+                    topic TEXT NOT NULL,
+                    score INTEGER NOT NULL,
+                    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_interview_topic_history_user_topic
+                    ON interview_topic_history (user_id, topic, recorded_at)
+            """)
 
 
 def dict_cursor(conn):

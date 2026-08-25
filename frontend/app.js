@@ -349,9 +349,11 @@ function renderTopicFilterBanner() {
   };
 }
 
-function filterProblemsByTopic(topicName) {
+function filterProblemsByTopic(topicName, track = "sql") {
   activeTopicFilter = topicName;
-  showSqlTrack();
+  if (track === "case") showCaseTrack();
+  else if (track === "python") showPythonTrack();
+  else showSqlTrack();
   document.getElementById("topicFilter").value = topicName;
   renderProblemList();
 }
