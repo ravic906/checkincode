@@ -656,10 +656,26 @@ def _interview_system_prompt(
         "answer. This is tracked separately from your action/topic choice "
         "and used to force a topic change even if you pick follow_up, so "
         "set it honestly regardless of what action you choose.\n\n"
+        "When their answer was wrong or only partially correct -- not a "
+        "genuine non-attempt, that's candidate_stuck above -- decide "
+        "whether a hint would actually help before just asking a plain "
+        "follow_up. If so, set `offer_hint` to true and phrase the "
+        "follow_up's `question` to include ONE hint or a simpler restated "
+        "version of the question, the way a good interviewer nudges "
+        "someone back on track rather than just repeating the ask. Never "
+        "offer a second hint on the same topic -- if they're still stuck "
+        "after one hint, that's the same as giving up: move on with "
+        "switch_topic rather than hinting again.\n\n"
+        "If the candidate's answers are consistently very short, broken, "
+        "or show signs of language difficulty -- not to be confused with "
+        "candidate_stuck's genuine non-attempts -- simplify your own "
+        "phrasing to plain, simple English, and focus your follow-ups on "
+        "whether they grasp the underlying concept rather than precise "
+        "terminology or exact phrasing.\n\n"
         "Respond with ONLY a JSON object, no other text, no markdown code "
         'fences: {"action": "follow_up"|"probe"|"switch_topic", "topic": '
         '"<topic name>", "question": "<your next spoken question>", '
-        '"candidate_stuck": true|false, '
+        '"candidate_stuck": true|false, "offer_hint": true|false, '
         '"table_context": null | {"table_name": "<name>", "schema": '
         '"<CREATE TABLE ... statement as one line>", "sample_rows": '
         '"<a small markdown table of 3-6 example rows, columns separated '
@@ -1166,7 +1182,8 @@ def interview_turn(
     trusting the model to have echoed them back correctly, since it's been
     observed to keep returning follow_up past its instructed limit when
     that decision was left to its judgment. Returns:
-        {"action": str, "topic": str, "question": str, "usage": {...}}
+        {"action": str, "topic": str, "question": str, "candidate_stuck": bool,
+         "offer_hint": bool, "table_context": dict | None, "usage": {...}}
     Falls back to a generic switch_topic question if the model's reply isn't
     valid JSON, so a single malformed response doesn't break the interview.
     """
@@ -1201,6 +1218,7 @@ def interview_turn(
             "question": parsed["question"],
             "table_context": parsed.get("table_context"),
             "candidate_stuck": bool(parsed.get("candidate_stuck", False)),
+            "offer_hint": bool(parsed.get("offer_hint", False)),
             "usage": result["usage"],
         }
     except (json.JSONDecodeError, KeyError):
@@ -1210,6 +1228,7 @@ def interview_turn(
             "question": result["reply"],
             "table_context": None,
             "candidate_stuck": False,
+            "offer_hint": False,
             "usage": result["usage"],
         }
 

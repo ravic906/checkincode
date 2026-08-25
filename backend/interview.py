@@ -55,6 +55,7 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
         "conversation": [],  # [{"role": "assistant"|"user", "content": str, "topic": str|None}]
         "current_topic": None,
         "current_topic_turns": 0,
+        "hint_used_this_topic": False,
         "last_table_context": None,
         "ended": False,
         "feedback": None,
@@ -67,8 +68,8 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                 INSERT INTO interview_sessions
                     (session_id, user_id, mode, target_role, candidate_profile, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
-                     current_topic_turns, last_table_context, ended, feedback, persona)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     current_topic_turns, hint_used_this_topic, last_table_context, ended, feedback, persona)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
@@ -76,7 +77,8 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                     session["resume_text"], session["skip_intro"], session["duration_seconds"],
                     session["started_at"], json.dumps(session["topics_covered"]),
                     json.dumps(session["conversation"]), session["current_topic"],
-                    session["current_topic_turns"], json.dumps(session["last_table_context"]),
+                    session["current_topic_turns"], session["hint_used_this_topic"],
+                    json.dumps(session["last_table_context"]),
                     session["ended"], json.dumps(session["feedback"]), session["persona"],
                 ),
             )
@@ -93,12 +95,13 @@ def save_session(session: dict):
                 """
                 UPDATE interview_sessions SET
                     topics_covered=%s, conversation=%s, current_topic=%s,
-                    current_topic_turns=%s, last_table_context=%s, ended=%s, feedback=%s
+                    current_topic_turns=%s, hint_used_this_topic=%s, last_table_context=%s, ended=%s, feedback=%s
                 WHERE session_id=%s
                 """,
                 (
                     json.dumps(session["topics_covered"]), json.dumps(session["conversation"]),
                     session["current_topic"], session["current_topic_turns"],
+                    session.get("hint_used_this_topic", False),
                     json.dumps(session["last_table_context"]), session["ended"],
                     json.dumps(session["feedback"]), session["session_id"],
                 ),
@@ -139,7 +142,7 @@ def remove_last_turn(session: dict):
         save_session(session)
 
 
-def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuck: bool = False):
+def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuck: bool = False, offer_hint: bool = False):
     """
     Tracks how many consecutive question-turns have been spent on the
     current topic, so callers can enforce MAX_TURNS_PER_TOPIC deterministically
@@ -152,14 +155,26 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
     picked for THIS turn -- it's been observed to keep picking follow_up and
     re-asking a near-identical question rather than switching after a clear
     non-answer, same class of unreliability as the turn-budget itself.
+
+    `offer_hint` (the model gave a hint or a simpler restated question this
+    turn) gets the same backstop, capped at one hint per topic: if it's
+    already used its one hint on this topic and tries to offer another, the
+    turn counter is maxed out the same way, forcing a switch rather than
+    trusting the model to stop offering hints on its own.
     """
     if action == "switch_topic" or session["current_topic"] is None:
         session["current_topic"] = topic
         session["current_topic_turns"] = 1
+        session["hint_used_this_topic"] = False
         if topic not in session["topics_covered"]:
             session["topics_covered"].append(topic)
     else:
         session["current_topic_turns"] += 1
+        if offer_hint:
+            if session.get("hint_used_this_topic"):
+                session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
+            else:
+                session["hint_used_this_topic"] = True
         if candidate_stuck:
             session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
     save_session(session)

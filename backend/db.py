@@ -87,6 +87,12 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS candidate_profile JSONB
             """)
+            # Migration: one-hint-per-topic deterministic cap (Phase 2 of
+            # the mock interview rebuild) -- same "don't trust the model to
+            # self-limit" precedent as the topic-turn budget above.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS hint_used_this_topic BOOLEAN NOT NULL DEFAULT FALSE
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
                     id TEXT PRIMARY KEY,

@@ -847,12 +847,18 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             target_role=session.get("target_role") or "Data Analyst",
             candidate_profile=session.get("candidate_profile"),
         )
-        if result.get("candidate_stuck") and result["action"] != "switch_topic":
-            # A real interviewer moves on after ONE clear "I don't know" --
-            # they don't rephrase and ask again. Immediately re-run with a
-            # forced switch rather than deferring to next turn, so the
-            # candidate never sees a same-topic rephrase after a genuine
-            # non-answer.
+        hint_cap_hit = (
+            result.get("offer_hint")
+            and session.get("hint_used_this_topic")
+            and result["action"] != "switch_topic"
+        )
+        if (result.get("candidate_stuck") and result["action"] != "switch_topic") or hint_cap_hit:
+            # Two triggers for the same immediate-re-run pattern: a real
+            # interviewer moves on after ONE clear "I don't know" (don't
+            # rephrase and ask again), and doesn't offer a second hint on
+            # the same topic either. Re-run right away with a forced
+            # switch rather than deferring to next turn, so the candidate
+            # never sees a same-topic rephrase after either signal.
             result = llm.interview_turn(
                 user_id=user_id,
                 topics=topics_list,
@@ -872,7 +878,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
         raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
 
     interview.record_turn(session, "assistant", result["question"], result["topic"])
-    interview.update_topic_tracking(session, result["action"], result["topic"], result.get("candidate_stuck", False))
+    interview.update_topic_tracking(session, result["action"], result["topic"], result.get("candidate_stuck", False), result.get("offer_hint", False))
     interview.set_last_table_context(session, result["table_context"])
 
     return {
