@@ -437,12 +437,16 @@ def _interview_system_prompt(
         "those topic names (exact spelling), never an invented or "
         "paraphrased label -- this is what's used to track how long you've "
         "spent on each topic, so an inconsistent label breaks that "
-        "tracking. The one exception is a follow_up on the opening "
-        "introduction itself, before you've moved to a real topic yet -- "
-        "there, the topic field MUST be exactly \"intro\" instead, not one "
-        "of the list above. On follow_up/probe, reuse the SAME topic string "
-        "you (or the topic_budget note above) were already given for the "
-        "current topic.\n\n"
+        "tracking. The one exception: when your action is follow_up and "
+        "you are staying on the opening introduction itself (candidate "
+        "hasn't given you enough yet), the topic field MUST be exactly "
+        "\"intro\" instead. The moment your action is switch_topic -- "
+        "including switching away from the intro to begin the technical "
+        "portion -- the topic field MUST be a real topic name from the "
+        "list above, never \"intro\", since the whole point of switching "
+        "is to move onto one of those. On follow_up/probe on a real topic, "
+        "reuse the SAME topic string you (or the topic_budget note above) "
+        "were already given for the current topic.\n\n"
         "Whenever your question refers to a table (e.g. 'suppose you have a "
         "table called orders...'), you MUST invent a concrete schema and a "
         "handful of sample rows for it, and put them in `table_context` -- "
@@ -1016,9 +1020,21 @@ def interview_turn(
     result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview", messages=messages, max_tokens=700, json_mode=True)
     try:
         parsed = _parse_json_reply(result["reply"])
+        action = "switch_topic" if forced_topic else parsed.get("action", "switch_topic")
+        topic = forced_topic or parsed.get("topic", topics[0])
+        # "intro" is only ever a valid label while STAYING on the intro
+        # (action == follow_up) -- despite the prompt spelling this out
+        # explicitly, the model has been observed to still echo "intro"
+        # back on a switch_topic action meant to move onto a real topic,
+        # which would otherwise leave the session's topic tracking stuck
+        # believing it's still on the intro indefinitely. Same "don't
+        # trust the model's own bookkeeping" precedent as forced_topic
+        # above and the candidate_stuck override in main.py.
+        if action == "switch_topic" and topic not in topics:
+            topic = topics[0]
         return {
-            "action": "switch_topic" if forced_topic else parsed.get("action", "switch_topic"),
-            "topic": forced_topic or parsed.get("topic", topics[0]),
+            "action": action,
+            "topic": topic,
             "question": parsed["question"],
             "table_context": parsed.get("table_context"),
             "candidate_stuck": bool(parsed.get("candidate_stuck", False)),
