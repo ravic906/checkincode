@@ -750,29 +750,36 @@ MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB -- generously covers even a l
 @app.post("/api/interview/stt")
 async def api_interview_stt(file: UploadFile = File(...), session_id: str | None = Form(default=None), x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     """
-    Transcribes one recorded answer to text. Rides along with the same
-    gate as the rest of the interview (Pro tier or the one free trial) --
-    no separate STT quota, since you can't call this outside an interview
-    anyway and the interview-level cap (trial count / MAX_INTERVIEWS_PER_MONTH)
-    already limits exposure.
+    Transcribes one recorded answer to text.
 
-    session_id (optional -- degrades gracefully to no failure counting if
-    absent) lets a transcription failure count toward the same
-    consecutive-failure/connection-issue threshold as /api/interview/answer,
-    since a flaky mic/network is arguably the most likely real "connection
-    issue" a candidate hits -- leaving it uncounted would miss most of what
-    this feature exists for.
+    session_id, when it resolves to a session this user owns, is the gate --
+    the same reasoning as api_interview_answer's: mark_interview_trial_used()
+    already flipped interview_trial_used=True at /start, so re-running
+    _require_paid_or_trial() here would 402 every trial candidate's very
+    first spoken answer (confirmed live: voice input was completely broken
+    for every free-trial interview, immediately after it started -- trial
+    candidates could only ever use the typed-answer fallback). Session
+    ownership is the correct, sufficient gate for continuing a session that
+    was already validly started under the cap. Only falls back to the
+    paid/trial check when no valid session_id is given at all (defensive
+    default for a caller that somehow omits it, not the normal path).
+
+    Also lets a transcription failure count toward the same consecutive-
+    failure/connection-issue threshold as /api/interview/answer, since a
+    flaky mic/network is arguably the most likely real "connection issue"
+    a candidate hits.
     """
     user_id = auth.resolve_user_id(authorization, x_user_id)
-    u = users_module.get_usage(user_id)
-    if not users_module.is_admin(user_id):
-        _require_paid_or_trial(u)  # trial consumption only happens at /start, not here
 
     session = None
     if session_id:
         candidate_session = interview.get_session(session_id)
         if candidate_session and candidate_session["user_id"] == user_id:
             session = candidate_session
+
+    if session is None and not users_module.is_admin(user_id):
+        u = users_module.get_usage(user_id)
+        _require_paid_or_trial(u)
 
     audio_bytes = await file.read(MAX_AUDIO_UPLOAD_BYTES + 1)
     if len(audio_bytes) > MAX_AUDIO_UPLOAD_BYTES:
