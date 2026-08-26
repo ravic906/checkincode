@@ -89,23 +89,47 @@ function currentUserEmail() {
 // mount/unmount on an actual sign-in/out transition.
 let _authButtonMounted = false;
 
-// Whether the Admin Portal entry should be in the account popover --
-// starts false (never show it for a beat before we actually know) and
-// only flips via setAdminMenuState() (app.js's refreshTierBadge, once
-// /api/usage's is_admin comes back). customMenuItems is a static array
-// handed to mountUserButton at mount time, not reactive, so learning
-// is_admin *after* the button already mounted requires a deliberate
-// one-time remount -- see setAdminMenuState below. This is a real,
-// intentional remount on an actual state change, not the spurious
-// every-listener-tick kind the comment above warns against.
+// Whether the Admin Portal entry belongs in the account popover.
+// customMenuItems is a static array handed to mountUserButton once, at
+// mount time, not reactive -- given the remount hazard explained above, the
+// only safe way to get this right is to know it BEFORE that one mount call
+// ever happens, not to react to it becoming known afterward. See
+// fetchIsAdmin/renderAuthSection below.
 let _isAdmin = false;
+let _adminStatusPromise = null;
 
-function renderAuthSection() {
+function fetchIsAdmin() {
+  if (_adminStatusPromise) return _adminStatusPromise;
+  _adminStatusPromise = (async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return false;
+      const base = window.API_BASE || "http://127.0.0.1:8000";
+      const res = await fetch(`${base}/api/usage`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return !!data.is_admin;
+    } catch {
+      return false;
+    }
+  })();
+  return _adminStatusPromise;
+}
+
+let _authButtonMounting = false;
+
+async function renderAuthSection() {
   const el = document.getElementById("authSection");
   if (!el || !window.Clerk) return;
 
   if (window.Clerk.user) {
-    if (_authButtonMounted) return;
+    if (_authButtonMounted || _authButtonMounting) return;
+    _authButtonMounting = true;
+    _isAdmin = await fetchIsAdmin();
+    _authButtonMounting = false;
+    // Re-check after the await -- Clerk's listener may have already
+    // mounted (or the user may have signed out) while this was in flight.
+    if (_authButtonMounted || !window.Clerk.user) return;
     el.innerHTML = "";
     // Subscription status/upgrade/cancel opens as its own modal (see
     // app.js's openSubscriptionModal), reached via a customMenuItems
@@ -153,21 +177,6 @@ function renderAuthSection() {
     }
     el.innerHTML = `<button class="signin-btn" id="signInBtn">Sign In</button>`;
     document.getElementById("signInBtn").onclick = () => window.Clerk.openSignIn({});
-  }
-}
-
-// Called by app.js's refreshTierBadge once /api/usage's is_admin is known.
-// Only remounts the button when the flag actually changes (not on every
-// refreshTierBadge call, e.g. after every subscription check) -- see the
-// _isAdmin comment above for why a remount is needed at all here.
-function setAdminMenuState(isAdmin) {
-  if (isAdmin === _isAdmin) return;
-  _isAdmin = isAdmin;
-  if (_authButtonMounted) {
-    const el = document.getElementById("authSection");
-    if (el && window.Clerk) window.Clerk.unmountUserButton(el);
-    _authButtonMounted = false;
-    renderAuthSection();
   }
 }
 
