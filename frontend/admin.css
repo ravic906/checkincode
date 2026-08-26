@@ -83,6 +83,15 @@ body {
 }
 .admin-sidebar-nav a .icon { font-size: 15px; width: 18px; text-align: center; }
 
+.admin-sidebar-nav a.admin-nav-back {
+  margin-top: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+  border-left-color: transparent;
+  border-radius: 0;
+}
+.admin-sidebar-nav a.admin-nav-back:hover { background: var(--panel-2); color: var(--text); }
+
 .admin-sidebar-footer {
   padding: 14px 16px;
   border-top: 1px solid var(--border);
