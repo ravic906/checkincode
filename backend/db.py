@@ -305,6 +305,27 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_interview_topic_history_user_topic
                     ON interview_topic_history (user_id, topic, recorded_at)
             """)
+            # General site-activity log -- separate from `submissions`
+            # (already the full per-problem-attempt record, joined against
+            # `problems` for track/correctness in the admin views) and from
+            # interview_sessions/interview_topic_history (already the full
+            # interview record). This table is for everything else worth
+            # showing on a per-user activity timeline: sign-ins, track
+            # switches, interview start/end, resume actions, plan changes --
+            # see users.record_activity()/get_activity().
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_activity_events (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_activity_events_user_created
+                    ON user_activity_events (user_id, created_at)
+            """)
 
 
 def dict_cursor(conn):

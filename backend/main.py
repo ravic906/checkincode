@@ -109,6 +109,14 @@ class SubmitRequest(BaseModel):
     query: str
 
 
+ACTIVITY_EVENT_TYPES = {"viewed_sql_track", "viewed_python_track", "viewed_case_track", "viewed_mock_interview"}
+
+
+class LogActivityRequest(BaseModel):
+    event_type: str
+    metadata: dict | None = None
+
+
 class AskPhoenixRequest(BaseModel):
     problem_id: str
     current_query: str | None = None
@@ -269,6 +277,29 @@ def api_usage(x_user_id: str = Header(default=None), authorization: str | None =
     }
 
 
+@app.post("/api/activity")
+def api_log_activity(req: LogActivityRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Client-driven half of the site-activity log (see users.record_activity)
+    -- for browsing/navigation signals the backend has no other way to
+    observe (which track a candidate opened, whether they looked at Mock
+    Interview at all), as opposed to the server-side calls at points like
+    interview start/end or resume upload where the backend already knows
+    an event happened.
+
+    event_type is restricted to a fixed whitelist rather than trusting
+    whatever the client sends -- same "never trust client input, validate
+    against a known vocabulary" pattern as target_role/persona elsewhere in
+    this file, so this endpoint can only ever append one of a few known,
+    reviewed event shapes to a real user's own row, never arbitrary data.
+    """
+    if req.event_type not in ACTIVITY_EVENT_TYPES:
+        raise HTTPException(400, f"event_type must be one of {sorted(ACTIVITY_EVENT_TYPES)}")
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    users_module.record_activity(user_id, req.event_type, req.metadata)
+    return {"logged": True}
+
+
 @app.get("/api/progress")
 def api_progress(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
@@ -354,6 +385,7 @@ def api_payments_verify(req: VerifyPaymentRequest, x_user_id: str = Header(defau
         plan = "monthly"
 
     users_module.set_pro_period(user_id, plan)
+    users_module.record_activity(user_id, "upgraded_to_pro", {"plan": plan})
     return {"user_id": user_id, "tier": "paid", "plan": plan}
 
 
@@ -368,6 +400,7 @@ def api_payments_cancel(x_user_id: str = Header(default=None), authorization: st
     updated = users_module.cancel_pro(user_id)
     if updated is None:
         raise HTTPException(400, "No active Pro subscription to cancel.")
+    users_module.record_activity(user_id, "cancelled_pro")
     return updated
 
 
@@ -643,6 +676,7 @@ async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header
     except resume_parser.UnsupportedResumeFormat as e:
         raise HTTPException(400, str(e))
     users_module.set_resume(user_id, text)  # persist to the account -- every future interview reuses it until updated/deleted
+    users_module.record_activity(user_id, "resume_uploaded", {"chars": len(text)})
     return {"resume_text": text}
 
 
@@ -650,6 +684,7 @@ async def api_parse_resume(file: UploadFile = File(...), x_user_id: str = Header
 def api_delete_resume(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
     users_module.delete_resume(user_id)
+    users_module.record_activity(user_id, "resume_deleted")
     return {"deleted": True}
 
 
@@ -716,6 +751,8 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         users_module.mark_interview_trial_used(user_id)
     else:
         users_module.increment_interview_count(user_id)
+
+    users_module.record_activity(user_id, "interview_start", {"session_id": session["session_id"], "target_role": req.target_role})
 
     # Turn 1: greeting/settle-in/plan monologue, always -- independent of
     # skip_intro, which only controls whether the SEPARATE "introduce
@@ -1070,6 +1107,9 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
         # run exactly once per interview, not again on every idempotent
         # re-call of this endpoint against already-existing feedback.
         interview.record_topic_history(user_id, session["session_id"], feedback.get("topic_scores", []))
+        users_module.record_activity(user_id, "interview_end", {
+            "session_id": session["session_id"], "target_role": target_role, "score": feedback.get("score"),
+        })
     else:
         feedback = session["feedback"]
 
@@ -1223,6 +1263,17 @@ def api_admin_list_users(request: Request):
 def api_admin_user_history(user_id: str, request: Request):
     _require_admin(request)
     return {"history": problems_module.get_user_submission_history(user_id)}
+
+
+@app.get("/api/admin/users/{user_id}/activity")
+def api_admin_user_activity(user_id: str, request: Request):
+    """General site-activity timeline for one user (sign-ins aside --
+    those aren't observable server-side under the current Clerk-on-the-
+    frontend setup): track views, interview start/end, resume actions,
+    plan changes. Submissions have their own, more detailed endpoint
+    above; this is everything else, see users.record_activity."""
+    _require_admin(request)
+    return {"activity": users_module.get_activity(user_id)}
 
 
 @app.get("/api/admin/problems/live")

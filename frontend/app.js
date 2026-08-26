@@ -103,6 +103,15 @@ function _resetPracticeWorkspace() {
     </div>
   `;
 }
+// Fire-and-forget: a missed activity ping shouldn't ever block or error
+// out real navigation, so failures are silently swallowed. This is the
+// client-driven half of the site-activity log (see users.record_activity
+// in the backend) -- for browsing signals the backend has no other way to
+// observe, unlike e.g. interview start/end which it already sees directly.
+function logActivity(eventType) {
+  api("/api/activity", { method: "POST", body: JSON.stringify({ event_type: eventType }) }).catch(() => {});
+}
+
 function showSqlTrack() {
   currentTrack = "sql";
   _resetPracticeWorkspace();
@@ -116,6 +125,7 @@ function showSqlTrack() {
   populateTagFilter();
   renderProblemList();
   syncUrl({ track: "sql" });
+  logActivity("viewed_sql_track");
 }
 function showPythonTrack() {
   currentTrack = "python";
@@ -130,6 +140,7 @@ function showPythonTrack() {
   populateTagFilter();
   renderProblemList();
   syncUrl({ track: "python" });
+  logActivity("viewed_python_track");
 }
 function showCaseTrack() {
   currentTrack = "case";
@@ -144,6 +155,7 @@ function showCaseTrack() {
   populateTagFilter();
   renderProblemList();
   syncUrl({ track: "case" });
+  logActivity("viewed_case_track");
 }
 function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
@@ -153,6 +165,7 @@ function showInterviewScreen() {
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
   closeAskPhoenix();
+  logActivity("viewed_mock_interview");
 }
 
 // Shared markup/wiring for a Monthly + Yearly choice, reused by the tier

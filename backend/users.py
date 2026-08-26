@@ -10,6 +10,7 @@ Postgres used for interview sessions and problems) fixes that.
 """
 
 import datetime
+import json
 
 import db
 
@@ -172,6 +173,34 @@ def record_email(user_id: str, email: str) -> None:
                 """,
                 (user_id, email, _today()),
             )
+
+
+def record_activity(user_id: str, event_type: str, metadata: dict | None = None) -> None:
+    """Appends one row to the general site-activity log (see db.py's
+    user_activity_events) -- best-effort, fire-and-forget from callers'
+    perspective. Separate from submissions/interview tables, which already
+    fully capture their own domains; this is for everything else worth
+    showing on a per-user activity timeline (sign-ins, track switches,
+    interview start/end, resume actions, plan changes)."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO user_activity_events (user_id, event_type, metadata) VALUES (%s, %s, %s)",
+                (user_id, event_type, json.dumps(metadata) if metadata is not None else None),
+            )
+
+
+def get_activity(user_id: str, limit: int = 300) -> list[dict]:
+    """Most recent activity events for one user, newest first -- for the
+    admin per-user drill-down page."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(
+                "SELECT event_type, metadata, created_at FROM user_activity_events "
+                "WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+                (user_id, limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 def list_admins() -> list[dict]:
