@@ -536,14 +536,30 @@ function startTextReveal(index, fullText, audioEl) {
   renderTranscript();
   if (!audioEl) { speakingRevealIndex = null; return; }
 
-  function tick() {
-    if (speakingRevealIndex !== index || !interviewState) return; // superseded or interview ended
-    const duration = isFinite(audioEl.duration) ? audioEl.duration : 0;
-    const progress = duration > 0 ? audioEl.currentTime / duration : 1;
-    const finished = audioEl.ended || audioEl.paused || progress >= 1;
-    speakingRevealChars = finished ? fullText.length : Math.floor(fullText.length * progress);
+  // Termination uses the audio element's real "ended"/"pause" *events*,
+  // not its .paused *property* -- a freshly-created <audio> reports
+  // paused === true by default before playback has even begun (there's an
+  // async gap between calling .play() and audio actually starting), so
+  // polling the property caused the very first animation frame to see
+  // "paused" and instantly reveal the whole line before any sound played.
+  // The events, by contrast, only fire on a genuine pause/end transition.
+  let stopped = false;
+  const finish = () => {
+    if (stopped || speakingRevealIndex !== index) return;
+    stopped = true;
+    speakingRevealChars = fullText.length;
+    speakingRevealIndex = null;
     renderTranscript();
-    if (finished) { speakingRevealIndex = null; return; }
+  };
+  audioEl.addEventListener("ended", finish);
+  audioEl.addEventListener("pause", finish); // covers stopSpeaking() cutting playback short mid-reveal
+
+  function tick() {
+    if (stopped || speakingRevealIndex !== index || !interviewState) return; // superseded, interview ended, or already finished above
+    const duration = isFinite(audioEl.duration) ? audioEl.duration : 0;
+    const progress = duration > 0 ? Math.min(1, audioEl.currentTime / duration) : 0;
+    speakingRevealChars = Math.floor(fullText.length * progress);
+    renderTranscript();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
