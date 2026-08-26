@@ -635,10 +635,12 @@ function speak(text, onStart) {
   return speakViaApi(text, fireOnStart).catch(() => speakViaBrowser(text, fireOnStart));
 }
 
-function speakViaApi(text, onStart) {
+async function speakViaApi(text, onStart) {
+  const headers = await authHeaders();
+  headers["Content-Type"] = "application/json";
   return fetch(`${API_BASE}/api/interview/tts`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-User-Id": USER_ID },
+    headers,
     body: JSON.stringify({ text }),
   })
     .then((res) => {
