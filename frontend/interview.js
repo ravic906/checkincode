@@ -46,12 +46,28 @@ function setActiveSessionId(id) { localStorage.setItem(ACTIVE_SESSION_KEY, id); 
 function getActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_KEY); }
 function clearActiveSessionId() { localStorage.removeItem(ACTIVE_SESSION_KEY); }
 
+// Both of these bypass api()'s wrapper because they send FormData rather
+// than JSON, but still need the same signed-in-identity resolution -- the
+// backend prefers a verified Clerk Authorization token over the anonymous
+// X-User-Id header (auth.resolve_user_id), so omitting it here silently
+// misattributes the request to the browser-local anonymous id instead of
+// the signed-in account (e.g. wrongly hitting that anon id's own trial gate
+// even for an admin's real account).
+async function authHeaders() {
+  const headers = { "X-User-Id": USER_ID };
+  if (typeof isSignedIn === "function" && isSignedIn()) {
+    const token = await getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 async function uploadResume(file) {
   const formData = new FormData();
   formData.append("file", file);
   const res = await fetch(`${API_BASE}/api/interview/parse-resume`, {
     method: "POST",
-    headers: { "X-User-Id": USER_ID },
+    headers: await authHeaders(),
     body: formData,
   });
   if (!res.ok) {
@@ -67,7 +83,7 @@ async function transcribeAudio(blob) {
   if (interviewState) formData.append("session_id", interviewState.sessionId);
   const res = await fetch(`${API_BASE}/api/interview/stt`, {
     method: "POST",
-    headers: { "X-User-Id": USER_ID },
+    headers: await authHeaders(),
     body: formData,
   });
   if (!res.ok) {
