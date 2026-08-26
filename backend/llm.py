@@ -402,7 +402,50 @@ def analyze_candidate_profile(*, user_id: str, resume_text: str | None, target_r
         return default_profile
 
 
-def build_opening_monologue(*, target_role: str, profile: dict, persona: str) -> str:
+def classify_history_preference(*, user_id: str, answer_text: str | None) -> bool:
+    """
+    [Profile Analyzer] Interprets the candidate's spoken/typed reply to the
+    opening monologue's "focus on past weak areas, or start fresh?" question
+    (only asked when there's real interview_topic_history for this
+    candidate -- see build_opening_monologue's ask_history_pref).
+
+    Defaults to True (use history) for anything empty, garbled, or
+    ambiguous: this is asked orally with no re-prompt loop, so silence or
+    an unclear answer has to resolve to *something*, and the more useful
+    default for a practice tool is to actually use the data it already has
+    rather than silently discard it. Never raises -- any failure degrades
+    to the same default rather than blocking the interview from proceeding.
+    """
+    text = (answer_text or "").strip()
+    if not text:
+        return True
+    try:
+        result = _call_chat_with_retry(
+            user_id=user_id, problem_id="mock-interview-history-pref",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "The candidate was just asked, at the end of a mock interview's "
+                        "opening greeting: \"Would you like me to check back on a few "
+                        "areas you found tricky last time, or would you rather start "
+                        "completely fresh today?\" Classify their reply below.\n\n"
+                        'Respond with ONLY a JSON object: {"use_history": true|false}. '
+                        "If the reply doesn't clearly answer the question (off-topic, "
+                        'unclear, garbled transcription, etc.), respond {"use_history": true}.'
+                    ),
+                },
+                {"role": "user", "content": text[:500]},
+            ],
+            max_tokens=30, json_mode=True,
+        )
+        parsed = _parse_json_reply(result["reply"])
+        return bool(parsed.get("use_history", True))
+    except Exception:
+        return True
+
+
+def build_opening_monologue(*, target_role: str, profile: dict, persona: str, ask_history_pref: bool = False) -> str:
     """
     [Interviewer] Static, role-templated opening -- greeting, settle-in,
     explain-it's-practice, and a short plan -- built from the profile
@@ -417,15 +460,34 @@ def build_opening_monologue(*, target_role: str, profile: dict, persona: str) ->
     whichever question actually opens the interview proper (the hardcoded
     "introduce yourself" question, or a live-generated first question when
     skip_intro is set).
+
+    ask_history_pref=True (only when this candidate has real
+    interview_topic_history) appends an oral question asking whether to
+    weight this session toward past weak areas or ignore that history --
+    `profile` passed in here is deliberately the history-agnostic version,
+    so this monologue never presupposes an answer the candidate hasn't
+    given yet. See api_interview_start/api_interview_answer in main.py for
+    where the candidate's spoken reply gets classified (classify_history_
+    preference) and, if requested, folded into a second analyze_candidate_
+    profile call before the real first question is asked.
     """
-    return (
+    monologue = (
         f"Hi, thanks for joining -- welcome to your practice interview for "
         f"a {target_role} role. Take a breath, there's no pressure here -- "
         "this is just practice, so treat any stumble as useful information, "
         f"not a verdict. {profile.get('opening_note', '')} We'll go through "
-        "a few areas, and I'll follow up where it's useful. Whenever you're "
-        "ready, let's get started."
+        "a few areas, and I'll follow up where it's useful."
     )
+    if ask_history_pref:
+        monologue += (
+            " One quick thing first, since you've interviewed with us before: "
+            "would you like me to check back on a few areas you found tricky "
+            "last time, or would you rather start completely fresh today? "
+            "Just tell me either way."
+        )
+    else:
+        monologue += " Whenever you're ready, let's get started."
+    return monologue
 
 
 def _interview_system_prompt(

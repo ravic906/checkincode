@@ -35,7 +35,7 @@ CONNECTION_ISSUE_THRESHOLD = 2  # 2 consecutive STT/LLM failures -- one retry ch
 GENERIC_TOPICS = topics.ALL_TOPICS
 
 
-def create_session(*, user_id: str, target_role: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False, persona: str = "neutral", candidate_profile: dict | None = None) -> dict:
+def create_session(*, user_id: str, target_role: str, resume_text: str | None, skip_intro: bool, duration_seconds: int = INTERVIEW_DURATION_SECONDS, is_trial: bool = False, persona: str = "neutral", candidate_profile: dict | None = None, awaiting_history_pref: bool = False) -> dict:
     if is_trial:
         # A separate branch, not a lowered floor -- so a paid user's
         # request can never accidentally slide under the real 20 min floor.
@@ -62,6 +62,7 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
         "ended": False,
         "feedback": None,
         "persona": persona,  # "friendly" | "neutral" | "strict" -- immutable for the session's life
+        "awaiting_history_pref": awaiting_history_pref,
     }
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -70,8 +71,9 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                 INSERT INTO interview_sessions
                     (session_id, user_id, mode, target_role, candidate_profile, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
-                     current_topic_turns, hint_used_this_topic, consecutive_failures, last_table_context, ended, feedback, persona)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     current_topic_turns, hint_used_this_topic, consecutive_failures, last_table_context, ended, feedback, persona,
+                     awaiting_history_pref)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
@@ -83,6 +85,7 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                     session["consecutive_failures"],
                     json.dumps(session["last_table_context"]),
                     session["ended"], json.dumps(session["feedback"]), session["persona"],
+                    session["awaiting_history_pref"],
                 ),
             )
     return session
@@ -99,7 +102,8 @@ def save_session(session: dict):
                 UPDATE interview_sessions SET
                     topics_covered=%s, conversation=%s, current_topic=%s,
                     current_topic_turns=%s, hint_used_this_topic=%s, consecutive_failures=%s,
-                    last_table_context=%s, ended=%s, feedback=%s
+                    last_table_context=%s, ended=%s, feedback=%s, awaiting_history_pref=%s,
+                    candidate_profile=%s
                 WHERE session_id=%s
                 """,
                 (
@@ -108,7 +112,8 @@ def save_session(session: dict):
                     session.get("hint_used_this_topic", False),
                     session.get("consecutive_failures", 0),
                     json.dumps(session["last_table_context"]), session["ended"],
-                    json.dumps(session["feedback"]), session["session_id"],
+                    json.dumps(session["feedback"]), session.get("awaiting_history_pref", False),
+                    json.dumps(session.get("candidate_profile")), session["session_id"],
                 ),
             )
 

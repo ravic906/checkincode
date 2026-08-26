@@ -1308,6 +1308,9 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 }
 .chat-turn.assistant .chat-bubble { background: var(--studio-panel); border: 1px solid var(--studio-border); border-top-left-radius: 4px; }
 .chat-turn.user .chat-bubble { background: rgba(79,140,255,0.14); border: 1px solid rgba(79,140,255,0.3); border-top-right-radius: 4px; }
+.chat-bubble.revealing::after { content: "\258C"; display: inline-block; margin-left: 2px; animation: chat-cursor-blink 0.9s steps(1) infinite; }
+@keyframes chat-cursor-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chat-bubble.revealing::after { animation: none; } }
 
 .interview-controls {
   display: flex;

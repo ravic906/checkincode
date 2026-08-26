@@ -100,6 +100,16 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0
             """)
+            # Migration: lets the opening monologue ask a returning candidate
+            # (one with real interview_topic_history) whether to focus this
+            # session on past weak areas or start fresh, rather than always
+            # silently assuming history should be used. True only between
+            # the monologue being spoken and the candidate's reply to that
+            # specific question; api_interview_answer clears it right after
+            # classifying that reply.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS awaiting_history_pref BOOLEAN NOT NULL DEFAULT FALSE
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
                     id TEXT PRIMARY KEY,

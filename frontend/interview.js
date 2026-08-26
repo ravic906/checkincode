@@ -416,14 +416,20 @@ function beginLiveInterview(startRes, targetRole, resumeText) {
   setActiveSessionId(startRes.session_id);
   renderLiveInterview();
   setAnswerControlsEnabled(false);
+  speakingRevealIndex = null; // discard any leftover reveal state from a previous session
 
   const appendAssistantLine = (content, topic) => {
     interviewState.transcript.push({ role: "assistant", content, topic });
-    renderTranscript();
+    startTextReveal(interviewState.transcript.length - 1, content, currentAudio);
   };
+  // startRes.question is null when the opening monologue ended by asking
+  // the history-preference question instead (see api_interview_start's
+  // awaiting_history_pref branch) -- there's no second line to speak yet;
+  // the candidate's spoken/typed reply goes through the normal answer flow
+  // and the backend responds with the real first question from there.
   const speakChain = startRes.opening_monologue
     ? speak(startRes.opening_monologue, () => appendAssistantLine(startRes.opening_monologue, null))
-        .then(() => speak(startRes.question, () => appendAssistantLine(startRes.question, startRes.topic)))
+        .then(() => startRes.question && speak(startRes.question, () => appendAssistantLine(startRes.question, startRes.topic)))
     : speak(startRes.question, () => appendAssistantLine(startRes.question, startRes.topic));
   speakChain.finally(() => setAnswerControlsEnabled(true));
   startTimer();
@@ -493,17 +499,54 @@ function renderLiveInterview() {
   };
 }
 
-function renderChatBubble(t) {
+// While an assistant line is mid-speech, its bubble shows only the prefix
+// revealed so far (see startTextReveal) instead of the full text -- this is
+// what makes the caption progress in step with the voice rather than
+// appearing all at once.
+let speakingRevealIndex = null;
+let speakingRevealChars = 0;
+
+function renderChatBubble(t, idx) {
   const isAssistant = t.role === "assistant";
+  const isRevealing = isAssistant && idx === speakingRevealIndex;
+  const content = isRevealing ? t.content.slice(0, speakingRevealChars) : t.content;
   return `
     <div class="chat-turn ${isAssistant ? "assistant" : "user"}">
       <div class="chat-avatar ${isAssistant ? "assistant" : "user"}">${isAssistant ? "◆" : "●"}</div>
       <div class="chat-bubble-col">
         <div class="chat-who">${isAssistant ? "Interviewer" : "You"}${t.topic && t.topic !== "intro" ? `<span class="chat-topic">${escapeHtml(t.topic)}</span>` : ""}</div>
-        <div class="chat-bubble">${escapeHtml(t.content)}</div>
+        <div class="chat-bubble${isRevealing ? " revealing" : ""}">${escapeHtml(content)}</div>
       </div>
     </div>
   `;
+}
+
+// Real per-word timestamps aren't available from the TTS API, so this
+// approximates them: reveal text proportionally to the audio element's own
+// playback position (currentTime/duration), re-checked every frame. Close
+// enough to read as "captions following the voice" rather than a fixed
+// typing-speed guess that would drift out of sync on longer or shorter
+// lines. audioEl is null for the browser-speechSynthesis fallback path, in
+// which case it just reveals immediately (matches that path's pre-existing
+// behavior -- true word boundaries there would need the separate
+// `boundary` event API, not worth it for a rarely-hit fallback).
+function startTextReveal(index, fullText, audioEl) {
+  speakingRevealIndex = index;
+  speakingRevealChars = audioEl ? 0 : fullText.length;
+  renderTranscript();
+  if (!audioEl) { speakingRevealIndex = null; return; }
+
+  function tick() {
+    if (speakingRevealIndex !== index || !interviewState) return; // superseded or interview ended
+    const duration = isFinite(audioEl.duration) ? audioEl.duration : 0;
+    const progress = duration > 0 ? audioEl.currentTime / duration : 1;
+    const finished = audioEl.ended || audioEl.paused || progress >= 1;
+    speakingRevealChars = finished ? fullText.length : Math.floor(fullText.length * progress);
+    renderTranscript();
+    if (finished) { speakingRevealIndex = null; return; }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
 function renderTranscript() {
@@ -793,7 +836,7 @@ async function sendAnswer(answerText) {
         interviewState.tableContext = res.table_context;
         renderTableContext();
       }
-      renderTranscript();
+      startTextReveal(interviewState.transcript.length - 1, res.question, currentAudio);
     });
   } catch (err) {
     if (err.body && err.body.connection_issue) {

@@ -685,8 +685,15 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
 
     topics_list = role_topics.topics_for_role(req.target_role)
     topic_history = interview.get_topic_history(user_id, topics=topics_list)
+    has_history = bool(topic_history)
+    # Deliberately history-agnostic here even when topic_history exists --
+    # the candidate hasn't said yet whether they want it used this session
+    # (see the ask_history_pref monologue addition below). If they confirm
+    # "yes" in api_interview_answer's awaiting_history_pref branch, THAT's
+    # where analyze_candidate_profile gets called again, this time with
+    # topic_history, before the real first question is generated.
     profile = llm.analyze_candidate_profile(
-        user_id=user_id, resume_text=resume_text, target_role=req.target_role, topic_history=topic_history,
+        user_id=user_id, resume_text=resume_text, target_role=req.target_role, topic_history=None,
     )
 
     session = interview.create_session(
@@ -698,6 +705,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         is_trial=is_trial,
         persona=req.persona,
         candidate_profile=profile,
+        awaiting_history_pref=has_history,
     )
     if is_unrestricted:
         pass  # no trial/count bookkeeping at all for admins
@@ -712,9 +720,26 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
     # Turn 1: greeting/settle-in/plan monologue, always -- independent of
     # skip_intro, which only controls whether the SEPARATE "introduce
     # yourself" question (turn 2) is asked or skipped in favor of a live
-    # first real question. No candidate input happens between turns 1 and 2.
-    opening_monologue = llm.build_opening_monologue(target_role=req.target_role, profile=profile, persona=session["persona"])
+    # first real question. No candidate input happens between turns 1 and 2
+    # -- UNLESS has_history, in which case the monologue itself ends by
+    # asking the history-preference question and turn 2 waits for that
+    # spoken reply (handled in api_interview_answer) before being generated.
+    opening_monologue = llm.build_opening_monologue(
+        target_role=req.target_role, profile=profile, persona=session["persona"], ask_history_pref=has_history,
+    )
     interview.record_turn(session, "assistant", opening_monologue, None)
+
+    if has_history:
+        return {
+            "session_id": session["session_id"],
+            "opening_monologue": opening_monologue,
+            "question": None,
+            "topic": None,
+            "action": "awaiting_history_pref",
+            "table_context": None,
+            "remaining_seconds": interview.remaining_seconds(session),
+            "duration_seconds": session["duration_seconds"],
+        }
 
     if req.skip_intro:
         try:
@@ -858,6 +883,54 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             "time_up": True,
             "session_id": session["session_id"],
             "remaining_seconds": 0,
+        }
+
+    if session.get("awaiting_history_pref"):
+        # This reply answers the monologue's "focus on past weak areas, or
+        # start fresh?" question, not a real interview question -- generate
+        # the actual first question now instead of running interview_turn
+        # against a non-existent "topic". Mirrors api_interview_start's
+        # skip_intro/INTRO_QUESTION branch exactly, since this IS that
+        # branch, just deferred until the candidate answered.
+        session["awaiting_history_pref"] = False
+        target_role = session.get("target_role") or "Data Analyst"
+        topics_list = role_topics.topics_for_role(target_role)
+        use_history = llm.classify_history_preference(user_id=user_id, answer_text=req.answer_text)
+        profile = session.get("candidate_profile") or {}
+        if use_history:
+            topic_history = interview.get_topic_history(user_id, topics=topics_list)
+            if topic_history:
+                profile = llm.analyze_candidate_profile(
+                    user_id=user_id, resume_text=session["resume_text"],
+                    target_role=target_role, topic_history=topic_history,
+                )
+                session["candidate_profile"] = profile
+
+        if session["skip_intro"]:
+            try:
+                result = llm.interview_turn(
+                    user_id=user_id, topics=topics_list, resume_text=session["resume_text"],
+                    conversation=[], persona=session["persona"],
+                    target_role=target_role, candidate_profile=profile,
+                )
+            except Exception as e:
+                raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
+            question, topic, action, table_context = result["question"], result["topic"], result["action"], result["table_context"]
+        else:
+            question, topic, action, table_context = INTRO_QUESTION, "intro", "intro", None
+
+        interview.record_turn(session, "assistant", question, topic)
+        interview.update_topic_tracking(session, action, topic)
+        interview.set_last_table_context(session, table_context)
+
+        return {
+            "time_up": False,
+            "session_id": session["session_id"],
+            "question": question,
+            "topic": topic,
+            "action": action,
+            "table_context": table_context,
+            "remaining_seconds": interview.remaining_seconds(session),
         }
 
     # session["target_role"] can be missing/None only for an interview that
