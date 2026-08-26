@@ -268,6 +268,16 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_text TEXT
             """)
+            # Migration: username/full_name, captured the same way email is
+            # (see users.record_profile_info) -- best-effort from the
+            # signed-in Clerk profile, for admin lookups/support that
+            # shouldn't depend on an anonymous account id alone.
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT
+            """)
             # Additional, hidden, adversarially-constructed seed datasets for
             # SQL problems -- problems.seed_sql stays test case #1 (the one
             # shown to students); each row here is one more dataset a

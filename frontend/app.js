@@ -22,9 +22,22 @@ async function api(path, options = {}) {
   if (typeof isSignedIn === "function" && isSignedIn()) {
     const token = await getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    // Percent-encoded: a full name can contain non-ASCII characters that
+    // raw HTTP header values can't carry (fetch throws on them) -- the
+    // email/username are normally ASCII already, but encoding all three
+    // uniformly means one decode step server-side instead of three
+    // slightly-different assumptions about which fields might need it.
     if (typeof currentUserEmail === "function") {
       const email = currentUserEmail();
-      if (email) headers["X-User-Email"] = email;
+      if (email) headers["X-User-Email"] = encodeURIComponent(email);
+    }
+    if (typeof currentUsername === "function") {
+      const username = currentUsername();
+      if (username) headers["X-User-Username"] = encodeURIComponent(username);
+    }
+    if (typeof currentUserFullName === "function") {
+      const fullName = currentUserFullName();
+      if (fullName) headers["X-User-Full-Name"] = encodeURIComponent(fullName);
     }
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });

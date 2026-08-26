@@ -16,11 +16,18 @@ function renderSummary(summary) {
 }
 
 function renderUserRow(u) {
-  const label = u.email || u.id;
+  const label = u.full_name || u.email || u.id;
+  const subLabelParts = [];
+  if (u.full_name && u.email) subLabelParts.push(u.email);
+  if (u.username) subLabelParts.push(`@${u.username}`);
+  const subLabel = subLabelParts.join(" · ");
   const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : "—";
   return `
     <tr class="clickable" data-user-id="${escapeHtml(u.id)}">
-      <td>${escapeHtml(label)}</td>
+      <td>
+        <div>${escapeHtml(label)}</div>
+        ${subLabel ? `<div class="user-sublabel">${escapeHtml(subLabel)}</div>` : ""}
+      </td>
       <td><span class="pill tier-${u.tier}">${escapeHtml(u.tier)}</span></td>
       <td>${u.submissions_today}</td>
       <td>${u.total_submissions}</td>

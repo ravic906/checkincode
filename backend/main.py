@@ -25,6 +25,7 @@ Tiering (Postgres-backed, see users.py):
 import hmac
 import os
 import re
+from urllib.parse import unquote
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.responses import JSONResponse
@@ -256,10 +257,23 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
 
 
 @app.get("/api/usage")
-def api_usage(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None), x_user_email: str | None = Header(default=None)):
+def api_usage(
+    x_user_id: str = Header(default=None),
+    authorization: str | None = Header(default=None),
+    x_user_email: str | None = Header(default=None),
+    x_user_username: str | None = Header(default=None),
+    x_user_full_name: str | None = Header(default=None),
+):
     user_id = auth.resolve_user_id(authorization, x_user_id)
-    if x_user_email:
-        users_module.record_email(user_id, x_user_email)
+    if x_user_email or x_user_username or x_user_full_name:
+        # Percent-decoded: the frontend encodes these since a full name can
+        # contain non-ASCII characters raw HTTP headers can't carry.
+        users_module.record_profile_info(
+            user_id,
+            email=unquote(x_user_email) if x_user_email else None,
+            username=unquote(x_user_username) if x_user_username else None,
+            full_name=unquote(x_user_full_name) if x_user_full_name else None,
+        )
     u = users_module.get_usage(user_id)
     return {
         "user_id": user_id,

@@ -78,6 +78,16 @@ function currentUserEmail() {
   return window.Clerk.user.primaryEmailAddress?.emailAddress || null;
 }
 
+function currentUsername() {
+  if (!window.Clerk || !window.Clerk.user) return null;
+  return window.Clerk.user.username || null;
+}
+
+function currentUserFullName() {
+  if (!window.Clerk || !window.Clerk.user) return null;
+  return window.Clerk.user.fullName || null;
+}
+
 // Clerk fires its listener on lots of internal state changes (token
 // refresh, focus, etc.), not just sign-in/out. mountUserButton() renders a
 // React tree into #authSection -- wiping it with innerHTML="" and

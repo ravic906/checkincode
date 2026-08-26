@@ -155,23 +155,29 @@ def increment_interview_count(user_id: str):
             cur.execute("UPDATE users SET interviews_this_month = interviews_this_month + 1 WHERE id = %s", (user_id,))
 
 
-def record_email(user_id: str, email: str) -> None:
-    """Best-effort capture of a signed-in user's email address, called from
-    high-traffic identity-bearing endpoints (see main.py's /api/usage) so
-    admin support/lookups don't depend on a payment ever having happened
-    (set_tier/set_pro_period were the only prior writers of this column).
-    Upserts so it works even if the user has never hit any other endpoint."""
-    if not email:
+def record_profile_info(user_id: str, email: str | None = None, username: str | None = None, full_name: str | None = None) -> None:
+    """Best-effort capture of a signed-in user's Clerk profile fields,
+    called from high-traffic identity-bearing endpoints (see main.py's
+    /api/usage) so admin support/lookups don't depend on a payment ever
+    having happened (set_tier/set_pro_period were the only prior writers
+    of the email column). Upserts so it works even if the user has never
+    hit any other endpoint. Each field only overwrites when actually
+    provided -- a request missing one (e.g. no username set in Clerk)
+    never blanks out a value captured on an earlier call."""
+    if not email and not username and not full_name:
         return
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO users (id, email, tier, usage_date, submissions_today, explanations_today)
-                VALUES (%s, %s, 'free', %s, 0, 0)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
+                INSERT INTO users (id, email, username, full_name, tier, usage_date, submissions_today, explanations_today)
+                VALUES (%s, %s, %s, %s, 'free', %s, 0, 0)
+                ON CONFLICT (id) DO UPDATE SET
+                    email = COALESCE(EXCLUDED.email, users.email),
+                    username = COALESCE(EXCLUDED.username, users.username),
+                    full_name = COALESCE(EXCLUDED.full_name, users.full_name)
                 """,
-                (user_id, email, _today()),
+                (user_id, email, username, full_name, _today()),
             )
 
 
@@ -257,14 +263,14 @@ def list_all_users() -> list[dict]:
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
             cur.execute("""
-                SELECT u.id, u.email, u.tier, u.submissions_today,
+                SELECT u.id, u.email, u.username, u.full_name, u.tier, u.submissions_today,
                        u.interviews_this_month, u.created_at,
                        COUNT(s.id) AS total_submissions,
                        COUNT(s.id) FILTER (WHERE s.correct) AS correct_submissions,
                        COUNT(DISTINCT s.problem_id) FILTER (WHERE s.correct) AS solved_count
                 FROM users u
                 LEFT JOIN submissions s ON s.user_id = u.id
-                GROUP BY u.id, u.email, u.tier, u.submissions_today,
+                GROUP BY u.id, u.email, u.username, u.full_name, u.tier, u.submissions_today,
                          u.interviews_this_month, u.created_at
                 ORDER BY u.created_at DESC
             """)

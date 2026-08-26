@@ -236,6 +236,7 @@ table.admin-table td {
 table.admin-table tr:last-child td { border-bottom: none; }
 table.admin-table tr.clickable { cursor: pointer; }
 table.admin-table tr.clickable:hover td { background: var(--panel-2); }
+.user-sublabel { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
 /* ---------- Pills / badges ---------- */
 
