@@ -400,10 +400,9 @@ function beginLiveInterview(startRes, targetRole, resumeText) {
   // greeting/settle-in/plan monologue (always), then the actual first
   // question (the "introduce yourself" intro, or a live first question if
   // skip_intro was set) -- see api_interview_start's opening_monologue.
-  const transcript = [{ role: "assistant", content: startRes.question, topic: startRes.topic }];
-  if (startRes.opening_monologue) {
-    transcript.unshift({ role: "assistant", content: startRes.opening_monologue, topic: null });
-  }
+  // Transcript starts empty -- each line is appended by speak()'s onStart,
+  // right as its audio begins, so the text a candidate sees always matches
+  // what they're currently hearing instead of jumping ahead of the voice.
   interviewState = {
     sessionId: startRes.session_id,
     targetRole,
@@ -411,16 +410,22 @@ function beginLiveInterview(startRes, targetRole, resumeText) {
     remainingSeconds: startRes.remaining_seconds,
     durationSeconds: startRes.duration_seconds || 45 * 60,
     timerHandle: null,
-    transcript,
+    transcript: [],
     tableContext: startRes.table_context || null,
   };
   setActiveSessionId(startRes.session_id);
   renderLiveInterview();
-  if (startRes.opening_monologue) {
-    speak(startRes.opening_monologue).then(() => speak(startRes.question));
-  } else {
-    speak(startRes.question);
-  }
+  setAnswerControlsEnabled(false);
+
+  const appendAssistantLine = (content, topic) => {
+    interviewState.transcript.push({ role: "assistant", content, topic });
+    renderTranscript();
+  };
+  const speakChain = startRes.opening_monologue
+    ? speak(startRes.opening_monologue, () => appendAssistantLine(startRes.opening_monologue, null))
+        .then(() => speak(startRes.question, () => appendAssistantLine(startRes.question, startRes.topic)))
+    : speak(startRes.question, () => appendAssistantLine(startRes.question, startRes.topic));
+  speakChain.finally(() => setAnswerControlsEnabled(true));
   startTimer();
 }
 
@@ -549,11 +554,29 @@ let speechKeepAliveTimer = null;
 // usable if the new call fails.
 let currentAudio = null;
 
-function speak(text) {
-  return speakViaApi(text).catch(() => speakViaBrowser(text));
+// `onStart`, if given, fires right as playback actually begins -- not when
+// speak() is called or when the text is available. The TTS call is a
+// network round-trip, so rendering the transcript bubble eagerly (as soon
+// as the reply text arrives) made the interviewer's words show up on screen
+// well before they were heard, which read as unnatural/out of sync. Passing
+// the transcript-append as onStart keeps text and voice appearing together.
+function speak(text, onStart) {
+  // Always stop whatever's currently playing first -- without this, two
+  // speak() calls close together (e.g. a candidate answering fast enough
+  // to trigger the next question before this one finishes) leave both
+  // Audio objects playing at once, which sounds like garbled, overlapping
+  // speech rather than a clean cut from one line to the next.
+  stopSpeaking();
+  let started = false;
+  const fireOnStart = () => {
+    if (started) return; // speakViaApi may invoke this then still fail/fall back -- never fire twice
+    started = true;
+    if (onStart) onStart();
+  };
+  return speakViaApi(text, fireOnStart).catch(() => speakViaBrowser(text, fireOnStart));
 }
 
-function speakViaApi(text) {
+function speakViaApi(text, onStart) {
   return fetch(`${API_BASE}/api/interview/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-User-Id": USER_ID },
@@ -573,8 +596,23 @@ function speakViaApi(text) {
       };
       audio.onended = () => { cleanup(); resolve(); };
       audio.onerror = () => { cleanup(); reject(new Error("Audio playback failed")); };
+      if (onStart) onStart();
       audio.play().catch((e) => { cleanup(); reject(e); });
     }));
+}
+
+// Disabled while the interviewer's line is being read aloud, so the
+// candidate can't submit an answer to a question they haven't actually
+// heard yet (previously the mic/submit/textarea only locked during the
+// network call, then unlocked the instant the reply text arrived --
+// well before the TTS audio for it had even started playing).
+function setAnswerControlsEnabled(enabled) {
+  const micBtn = document.getElementById("micBtn");
+  const submitTypedBtn = document.getElementById("submitTypedBtn");
+  const typedAnswer = document.getElementById("typedAnswer");
+  if (micBtn) micBtn.disabled = !enabled;
+  if (submitTypedBtn) submitTypedBtn.disabled = !enabled;
+  if (typedAnswer) typedAnswer.disabled = !enabled;
 }
 
 function stopSpeaking() {
@@ -587,9 +625,9 @@ function stopSpeaking() {
   currentUtterance = null;
 }
 
-function speakViaBrowser(text) {
+function speakViaBrowser(text, onStart) {
   return new Promise((resolve) => {
-    if (!speechSynthesisSupported) { resolve(); return; }
+    if (!speechSynthesisSupported) { if (onStart) onStart(); resolve(); return; }
 
     window.speechSynthesis.cancel();
     clearInterval(speechKeepAliveTimer);
@@ -606,6 +644,7 @@ function speakViaBrowser(text) {
     utterance.onend = cleanup;
     utterance.onerror = cleanup;
 
+    if (onStart) onStart();
     window.speechSynthesis.speak(utterance);
 
     speechKeepAliveTimer = setInterval(() => {
@@ -727,10 +766,7 @@ async function submitAnswer(answerText) {
 // Split from submitAnswer so a connection-issue retry can resend the SAME
 // answer_text without re-pushing a duplicate user bubble into the transcript.
 async function sendAnswer(answerText) {
-  const micBtn = document.getElementById("micBtn");
-  const submitTypedBtn = document.getElementById("submitTypedBtn");
-  if (micBtn) micBtn.disabled = true;
-  if (submitTypedBtn) submitTypedBtn.disabled = true;
+  setAnswerControlsEnabled(false);
 
   try {
     const res = await api("/api/interview/answer", {
@@ -743,14 +779,22 @@ async function sendAnswer(answerText) {
       return;
     }
 
-    interviewState.transcript.push({ role: "assistant", content: res.question, topic: res.topic });
     interviewState.remainingSeconds = res.remaining_seconds;
-    if (res.table_context) {
-      interviewState.tableContext = res.table_context;
-      renderTableContext();
-    }
-    renderTranscript();
-    speak(res.question);
+    // Keep controls disabled until the question has actually finished
+    // being read aloud, not just rendered -- otherwise the candidate can
+    // answer a question they haven't heard yet, and a fast-enough answer
+    // can trigger the *next* question's speak() before this one's audio
+    // has stopped, playing both at once. The transcript bubble (and any
+    // table schema for this question) only appears once speech actually
+    // starts, so what's on screen never gets ahead of what's been said.
+    await speak(res.question, () => {
+      interviewState.transcript.push({ role: "assistant", content: res.question, topic: res.topic });
+      if (res.table_context) {
+        interviewState.tableContext = res.table_context;
+        renderTableContext();
+      }
+      renderTranscript();
+    });
   } catch (err) {
     if (err.body && err.body.connection_issue) {
       renderConnectionIssuePrompt(() => sendAnswer(answerText));
@@ -759,8 +803,7 @@ async function sendAnswer(answerText) {
       renderTranscript();
     }
   } finally {
-    if (micBtn) micBtn.disabled = false;
-    if (submitTypedBtn) submitTypedBtn.disabled = false;
+    setAnswerControlsEnabled(true);
   }
 }
 
