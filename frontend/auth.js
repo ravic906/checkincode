@@ -89,6 +89,17 @@ function currentUserEmail() {
 // mount/unmount on an actual sign-in/out transition.
 let _authButtonMounted = false;
 
+// Whether the Admin Portal entry should be in the account popover --
+// starts false (never show it for a beat before we actually know) and
+// only flips via setAdminMenuState() (app.js's refreshTierBadge, once
+// /api/usage's is_admin comes back). customMenuItems is a static array
+// handed to mountUserButton at mount time, not reactive, so learning
+// is_admin *after* the button already mounted requires a deliberate
+// one-time remount -- see setAdminMenuState below. This is a real,
+// intentional remount on an actual state change, not the spurious
+// every-listener-tick kind the comment above warns against.
+let _isAdmin = false;
+
 function renderAuthSection() {
   const el = document.getElementById("authSection");
   if (!el || !window.Clerk) return;
@@ -108,20 +119,31 @@ function renderAuthSection() {
     // waitForClerk() comment above) to dodge a Monaco AMD collision, and
     // that path apparently doesn't support nested custom profile pages.
     // customMenuItems is a much simpler contract (just an onClick) with
-    // no such gap.
-    window.Clerk.mountUserButton(el, {
-      customMenuItems: [
-        {
-          label: "Subscription",
-          onClick: () => {
-            if (typeof openSubscriptionModal === "function") {
-              openSubscriptionModal();
-            }
-          },
-          mountIcon: (iconEl) => { iconEl.textContent = "💳"; },
-          unmountIcon: (iconEl) => { if (iconEl) iconEl.textContent = ""; },
+    // no such gap. Admin Portal lives here too, for the same reason --
+    // and only for admins, so it's absent from the array entirely (not
+    // just hidden) for everyone else.
+    const customMenuItems = [
+      {
+        label: "Subscription",
+        onClick: () => {
+          if (typeof openSubscriptionModal === "function") {
+            openSubscriptionModal();
+          }
         },
-      ],
+        mountIcon: (iconEl) => { iconEl.textContent = "💳"; },
+        unmountIcon: (iconEl) => { if (iconEl) iconEl.textContent = ""; },
+      },
+    ];
+    if (_isAdmin) {
+      customMenuItems.push({
+        label: "Admin Portal",
+        onClick: () => { window.location.href = "admin.html"; },
+        mountIcon: (iconEl) => { iconEl.textContent = "🛠️"; },
+        unmountIcon: (iconEl) => { if (iconEl) iconEl.textContent = ""; },
+      });
+    }
+    window.Clerk.mountUserButton(el, {
+      customMenuItems,
     });
     _authButtonMounted = true;
   } else {
@@ -131,6 +153,21 @@ function renderAuthSection() {
     }
     el.innerHTML = `<button class="signin-btn" id="signInBtn">Sign In</button>`;
     document.getElementById("signInBtn").onclick = () => window.Clerk.openSignIn({});
+  }
+}
+
+// Called by app.js's refreshTierBadge once /api/usage's is_admin is known.
+// Only remounts the button when the flag actually changes (not on every
+// refreshTierBadge call, e.g. after every subscription check) -- see the
+// _isAdmin comment above for why a remount is needed at all here.
+function setAdminMenuState(isAdmin) {
+  if (isAdmin === _isAdmin) return;
+  _isAdmin = isAdmin;
+  if (_authButtonMounted) {
+    const el = document.getElementById("authSection");
+    if (el && window.Clerk) window.Clerk.unmountUserButton(el);
+    _authButtonMounted = false;
+    renderAuthSection();
   }
 }
 

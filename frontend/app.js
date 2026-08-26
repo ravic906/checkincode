@@ -279,7 +279,7 @@ async function refreshTierBadge() {
   const usage = await api("/api/usage");
   currentTier = usage.tier;
   document.getElementById("brandPro").hidden = usage.tier !== "paid";
-  document.getElementById("adminNavLink").style.display = usage.is_admin ? "inline-flex" : "none";
+  if (typeof setAdminMenuState === "function") setAdminMenuState(usage.is_admin);
   return usage;
 }
 
