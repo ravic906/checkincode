@@ -313,7 +313,7 @@ async function doUpgrade(plan = "monthly") {
       amount: order.amount,
       currency: order.currency,
       order_id: order.order_id,
-      name: "Phoenix Prep",
+      name: "PhoenixPrep",
       description: plan === "yearly" ? "Pro membership -- ₹1,990/yr" : "Pro membership -- ₹199/mo",
       prefill: { email: (typeof currentUserEmail === "function" && currentUserEmail()) || "" },
       theme: { color: "#4f8cff" },
