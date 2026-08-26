@@ -22,6 +22,10 @@ async function api(path, options = {}) {
   if (typeof isSignedIn === "function" && isSignedIn()) {
     const token = await getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (typeof currentUserEmail === "function") {
+      const email = currentUserEmail();
+      if (email) headers["X-User-Email"] = email;
+    }
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {

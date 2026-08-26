@@ -154,6 +154,26 @@ def increment_interview_count(user_id: str):
             cur.execute("UPDATE users SET interviews_this_month = interviews_this_month + 1 WHERE id = %s", (user_id,))
 
 
+def record_email(user_id: str, email: str) -> None:
+    """Best-effort capture of a signed-in user's email address, called from
+    high-traffic identity-bearing endpoints (see main.py's /api/usage) so
+    admin support/lookups don't depend on a payment ever having happened
+    (set_tier/set_pro_period were the only prior writers of this column).
+    Upserts so it works even if the user has never hit any other endpoint."""
+    if not email:
+        return
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (id, email, tier, usage_date, submissions_today, explanations_today)
+                VALUES (%s, %s, 'free', %s, 0, 0)
+                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
+                """,
+                (user_id, email, _today()),
+            )
+
+
 def list_admins() -> list[dict]:
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:

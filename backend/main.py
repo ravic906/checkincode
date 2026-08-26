@@ -248,8 +248,10 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
 
 
 @app.get("/api/usage")
-def api_usage(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+def api_usage(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None), x_user_email: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
+    if x_user_email:
+        users_module.record_email(user_id, x_user_email)
     u = users_module.get_usage(user_id)
     return {
         "user_id": user_id,
