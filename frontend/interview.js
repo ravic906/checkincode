@@ -530,6 +530,12 @@ function renderChatBubble(t, idx) {
 // which case it just reveals immediately (matches that path's pre-existing
 // behavior -- true word boundaries there would need the separate
 // `boundary` event API, not worth it for a rarely-hit fallback).
+// Rough estimate of spoken characters/second at a natural pace (~150 wpm,
+// ~5.7 chars/word including the trailing space) -- used ONLY as a fallback
+// when the real audio duration isn't available (see below), never in place
+// of it when it is.
+const ESTIMATED_CHARS_PER_SECOND = 15;
+
 function startTextReveal(index, fullText, audioEl) {
   speakingRevealIndex = index;
   speakingRevealChars = audioEl ? 0 : fullText.length;
@@ -547,6 +553,7 @@ function startTextReveal(index, fullText, audioEl) {
   const finish = () => {
     if (stopped || speakingRevealIndex !== index) return;
     stopped = true;
+    clearInterval(intervalId);
     speakingRevealChars = fullText.length;
     speakingRevealIndex = null;
     renderTranscript();
@@ -554,15 +561,35 @@ function startTextReveal(index, fullText, audioEl) {
   audioEl.addEventListener("ended", finish);
   audioEl.addEventListener("pause", finish); // covers stopSpeaking() cutting playback short mid-reveal
 
-  function tick() {
-    if (stopped || speakingRevealIndex !== index || !interviewState) return; // superseded, interview ended, or already finished above
-    const duration = isFinite(audioEl.duration) ? audioEl.duration : 0;
-    const progress = duration > 0 ? Math.min(1, audioEl.currentTime / duration) : 0;
+  // Driven by setInterval, not requestAnimationFrame -- rAF is throttled to
+  // near-zero by the browser the moment the tab isn't visible/focused
+  // (switching tabs or apps mid-interview, a phone locking/backgrounding
+  // the browser), which silently froze the reveal at 0% for the rest of
+  // the clip, only jumping to the full line on the "ended" event -- i.e.
+  // exactly "text doesn't show until speech is done". A ~120ms interval
+  // still keeps firing (browsers only throttle it to roughly once/second
+  // in the background, never fully stop it), and is more than smooth
+  // enough for a caption-following-speech effect either way.
+  const intervalId = setInterval(() => {
+    if (stopped || speakingRevealIndex !== index || !interviewState) { clearInterval(intervalId); return; }
+    // audioEl.duration is frequently Infinity/NaN for a blob-sourced MP3
+    // until playback is well underway (a well-known browser quirk with
+    // MediaSource/blob audio and VBR-encoded MP3s, which often lack a
+    // reliable duration header). Falling back to a rough characters-per-
+    // second estimate keeps currentTime (which browsers DO report
+    // correctly throughout playback, real duration or not) driving a
+    // smoothly advancing reveal instead of stalling at 0% until duration
+    // resolves. Capped below 100% either way -- only the real "ended"/
+    // "pause" event is allowed to call it complete, so an estimation
+    // error can never finish the text before the audio actually does.
+    const realDuration = audioEl.duration;
+    const duration = isFinite(realDuration) && realDuration > 0
+      ? realDuration
+      : fullText.length / ESTIMATED_CHARS_PER_SECOND;
+    const progress = duration > 0 ? Math.min(0.98, audioEl.currentTime / duration) : 0;
     speakingRevealChars = Math.floor(fullText.length * progress);
     renderTranscript();
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+  }, 120);
 }
 
 function renderTranscript() {
