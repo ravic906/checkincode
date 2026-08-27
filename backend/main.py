@@ -515,6 +515,16 @@ def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = Non
         result["expected_preview"] = _preview(
             outcome["expected_columns"], [[sandbox._normalize_cell(v) for v in r] for r in outcome["expected_rows"]]
         )
+        # failed_index 0 is problem["seed_sql"] -- the same dataset shown in
+        # "Sample Data" on the problem page. Any later index is one of the
+        # hidden problem_test_cases datasets, never shown anywhere in the
+        # UI -- the frontend uses this to disclose that the Expected/Your
+        # output tables below are computed against data the candidate has
+        # never seen, rather than silently showing unfamiliar values with
+        # no explanation (confirmed confusing: without this, a candidate
+        # has no way to tell a hidden-dataset failure apart from a mistake
+        # against the sample they can actually see).
+        result["is_hidden_case"] = outcome["failed_index"] > 0
     return result
 
 

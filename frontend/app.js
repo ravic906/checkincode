@@ -864,6 +864,7 @@ async function loadProblem(id) {
         <h3>Schema</h3>
         <div class="schema-block">${escapeHtml(p.schema_sql)}</div>
         <h3>Sample Data</h3>
+        <p class="hidden-case-upfront-note">Submitting also checks your query against additional hidden datasets not shown here — write a general solution that works for any matching data, not one tailored to just this sample.</p>
         ${tablesHtml}
       </div>
       ${renderExamples(p)}
@@ -1102,6 +1103,10 @@ function renderResult(result, isPartialCheck = false) {
       : `<div class="result-banner pass">✅ Correct! Verified against DuckDB.</div>`;
   } else {
     html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
+
+    if (result.is_hidden_case) {
+      html += `<p class="hidden-case-note">This check ran your query against one of our hidden verification datasets — different data than the "Sample Data" shown above, used to make sure your query works in general rather than just for that one example. The tables below show that hidden dataset's data, not the sample's.</p>`;
+    }
 
     if (result.expected_preview || result.actual_preview) {
       html += `<div class="diff-preview">
