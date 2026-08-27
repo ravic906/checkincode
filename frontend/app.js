@@ -11,8 +11,13 @@ function getUserId() {
 const USER_ID = getUserId();
 
 async function api(path, options = {}) {
+  // A FormData body (e.g. a support ticket with an attachment) must NOT
+  // get a manually-set Content-Type -- fetch needs to compute its own
+  // multipart boundary header, which a pre-set "application/json" would
+  // silently override and corrupt the upload.
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     "X-User-Id": USER_ID,
     ...(options.headers || {}),
   };
@@ -267,6 +272,7 @@ function openContactModal() {
       <label>Your email<input type="email" id="contactEmail" required value="${escapeHtml(prefillEmail)}" placeholder="you@example.com" /></label>
       <label>Subject<input type="text" id="contactSubject" required maxlength="200" placeholder="What's this about?" /></label>
       <label>Message<textarea id="contactMessage" required maxlength="5000" rows="6" placeholder="Tell us what's going on…"></textarea></label>
+      <label>Attachment (optional)<input type="file" id="contactAttachment" accept="image/*,.pdf" /></label>
       <div id="contactFormError"></div>
       <button type="submit" class="submit-btn" id="contactSubmitBtn">Send</button>
     </form>
@@ -277,13 +283,19 @@ function openContactModal() {
     const email = document.getElementById("contactEmail").value.trim();
     const subject = document.getElementById("contactSubject").value.trim();
     const message = document.getElementById("contactMessage").value.trim();
+    const attachment = document.getElementById("contactAttachment").files[0];
     const errorEl = document.getElementById("contactFormError");
     const btn = document.getElementById("contactSubmitBtn");
     errorEl.textContent = "";
     if (!email || !subject || !message) return;
     btn.disabled = true;
     try {
-      await api("/api/support/tickets", { method: "POST", body: JSON.stringify({ email, subject, message }) });
+      const formData = new FormData();
+      formData.append("email", email);
+      formData.append("subject", subject);
+      formData.append("message", message);
+      if (attachment) formData.append("attachment", attachment);
+      await api("/api/support/tickets", { method: "POST", body: formData });
       body.innerHTML = `<p class="contact-form-sent">Thanks — we've got your message and will get back to you at ${escapeHtml(email)}.</p>`;
     } catch (err) {
       errorEl.textContent = err.message || "Couldn't send that. Try again in a moment.";

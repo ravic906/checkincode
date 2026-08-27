@@ -18,8 +18,13 @@ function getToken() {
 
 async function adminApi(path, options = {}) {
   const token = getToken();
+  // A FormData body (e.g. a ticket reply with an attachment) must NOT get
+  // a manually-set Content-Type -- fetch needs to compute its own
+  // multipart boundary header, which a pre-set "application/json" would
+  // silently override and corrupt the upload.
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers || {}),
   };
   if (token) headers["X-Admin-Token"] = token;
@@ -33,6 +38,26 @@ async function adminApi(path, options = {}) {
     throw new Error(body.detail || `Request failed (${res.status})`);
   }
   return res.json();
+}
+
+// Same auth as adminApi(), but for a binary response (a ticket/reply
+// attachment) rather than JSON -- a plain <a>/<img> tag can't attach the
+// X-Admin-Token/Authorization headers the endpoint requires, so viewing an
+// attachment goes through this fetch-then-blob-URL path instead.
+async function adminApiBlob(path) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers["X-Admin-Token"] = token;
+  if (typeof getAuthToken === "function") {
+    const clerkToken = await getAuthToken();
+    if (clerkToken) headers["Authorization"] = `Bearer ${clerkToken}`;
+  }
+  const res = await fetch(`${ADMIN_API_BASE}${path}`, { headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed (${res.status})`);
+  }
+  return res.blob();
 }
 
 function escapeHtml(s) {

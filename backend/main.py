@@ -124,10 +124,7 @@ MAX_SUPPORT_SUBJECT_LEN = 200
 MAX_SUPPORT_MESSAGE_LEN = 5000
 
 
-class SupportTicketRequest(BaseModel):
-    subject: str
-    message: str
-    email: str  # always collected in the contact form itself (pre-filled from Clerk when signed in, editable) -- a bare user_id isn't something a human can reply to
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024  # 8 MB -- generous for a screenshot, not for a video
 
 
 class AskPhoenixRequest(BaseModel):
@@ -327,7 +324,11 @@ def api_log_activity(req: LogActivityRequest, x_user_id: str = Header(default=No
 
 
 @app.post("/api/support/tickets")
-def api_create_support_ticket(req: SupportTicketRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+async def api_create_support_ticket(
+    subject: str = Form(...), message: str = Form(...), email: str = Form(...),
+    attachment: UploadFile | None = File(default=None),
+    x_user_id: str = Header(default=None), authorization: str | None = Header(default=None),
+):
     """
     Inbuilt support ticketing -- previously there was no way at all for a
     user to reach the team from within the product. Deliberately open to
@@ -335,18 +336,35 @@ def api_create_support_ticket(req: SupportTicketRequest, x_user_id: str = Header
     in, especially since sign-in itself is one of the things that could be
     broken); user_id is whatever auth.resolve_user_id resolves to, for
     context, but email is what actually makes a ticket actionable.
+
+    multipart/form-data rather than a JSON body, purely to carry the
+    optional attachment alongside the text fields -- same reasoning as
+    every other file-upload endpoint in this file.
     """
-    subject = req.subject.strip()
-    message = req.message.strip()
-    email = req.email.strip()
+    subject = subject.strip()
+    message = message.strip()
+    email = email.strip()
     if not subject or not message or not email:
         raise HTTPException(400, "subject, message, and email are all required.")
     if len(subject) > MAX_SUPPORT_SUBJECT_LEN:
         raise HTTPException(413, f"Subject too long -- {MAX_SUPPORT_SUBJECT_LEN} characters max.")
     if len(message) > MAX_SUPPORT_MESSAGE_LEN:
         raise HTTPException(413, f"Message too long -- {MAX_SUPPORT_MESSAGE_LEN} characters max.")
+
+    attachment_filename = attachment_content_type = attachment_data = None
+    if attachment is not None and attachment.filename:
+        attachment_data = await attachment.read(MAX_ATTACHMENT_BYTES + 1)
+        if len(attachment_data) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(413, f"Attachment too large -- {MAX_ATTACHMENT_BYTES // (1024*1024)} MB max.")
+        attachment_filename = attachment.filename
+        attachment_content_type = attachment.content_type
+
     user_id = auth.resolve_user_id(authorization, x_user_id)
-    ticket = support.create_ticket(user_id, email, subject, message)
+    ticket = support.create_ticket(
+        user_id, email, subject, message,
+        attachment_filename=attachment_filename, attachment_content_type=attachment_content_type,
+        attachment_data=attachment_data,
+    )
     return {"ticket": ticket}
 
 
@@ -375,18 +393,18 @@ def api_admin_set_ticket_status(ticket_id: int, req: SetTicketStatusRequest, req
     return {"ticket": ticket}
 
 
-class TicketReplyRequest(BaseModel):
-    message: str
-
-
 @app.post("/api/admin/tickets/{ticket_id}/reply")
-def api_admin_reply_to_ticket(ticket_id: int, req: TicketReplyRequest, request: Request):
+async def api_admin_reply_to_ticket(
+    ticket_id: int, request: Request,
+    message: str = Form(...), attachment: UploadFile | None = File(default=None),
+):
     """Sends an actual email to the ticket's submitter and records it in
     the thread -- the whole point of inbuilt ticketing over the earlier
     mailto:-link-only version, which only ever opened the admin's OWN mail
-    client rather than sending anything from the server."""
+    client rather than sending anything from the server. Only recorded
+    (with its attachment, if any) once the email actually sends."""
     _require_admin(request)
-    message = req.message.strip()
+    message = message.strip()
     if not message:
         raise HTTPException(400, "message is required.")
     ticket = support.get_ticket(ticket_id)
@@ -395,17 +413,56 @@ def api_admin_reply_to_ticket(ticket_id: int, req: TicketReplyRequest, request: 
     if not ticket.get("email"):
         raise HTTPException(400, "This ticket has no email address to reply to.")
 
+    attachment_filename = attachment_content_type = attachment_data = None
+    if attachment is not None and attachment.filename:
+        attachment_data = await attachment.read(MAX_ATTACHMENT_BYTES + 1)
+        if len(attachment_data) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(413, f"Attachment too large -- {MAX_ATTACHMENT_BYTES // (1024*1024)} MB max.")
+        attachment_filename = attachment.filename
+        attachment_content_type = attachment.content_type
+
     try:
         email_sender.send_email(
             to=ticket["email"],
             subject=f"Re: {ticket['subject']}",
             body_text=message,
+            attachment={"filename": attachment_filename, "data": attachment_data} if attachment_data else None,
         )
     except RuntimeError as e:
         raise HTTPException(502, f"Couldn't send the reply email ({e}).")
 
-    reply = support.add_reply(ticket_id, message)
+    reply = support.add_reply(
+        ticket_id, message,
+        attachment_filename=attachment_filename, attachment_content_type=attachment_content_type,
+        attachment_data=attachment_data,
+    )
     return {"reply": reply}
+
+
+@app.get("/api/admin/tickets/{ticket_id}/attachment")
+def api_admin_get_ticket_attachment(ticket_id: int, request: Request):
+    _require_admin(request)
+    attachment = support.get_ticket_attachment(ticket_id)
+    if not attachment:
+        raise HTTPException(404, "This ticket has no attachment.")
+    return Response(
+        content=attachment["data"],
+        media_type=attachment["content_type"] or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{attachment["filename"]}"'},
+    )
+
+
+@app.get("/api/admin/tickets/{ticket_id}/replies/{reply_id}/attachment")
+def api_admin_get_reply_attachment(ticket_id: int, reply_id: int, request: Request):
+    _require_admin(request)
+    attachment = support.get_reply_attachment(reply_id)
+    if not attachment:
+        raise HTTPException(404, "This reply has no attachment.")
+    return Response(
+        content=attachment["data"],
+        media_type=attachment["content_type"] or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{attachment["filename"]}"'},
+    )
 
 
 @app.get("/api/progress")

@@ -391,6 +391,29 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket
                     ON ticket_replies (ticket_id, created_at)
             """)
+            # Attachments -- stored directly in Postgres as BYTEA rather
+            # than a separate object-storage service, matching this app's
+            # bias toward not adding a new external dependency for
+            # something this low-volume. One optional attachment per
+            # ticket (the initial submission) and per reply.
+            cur.execute("""
+                ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS attachment_filename TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS attachment_content_type TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS attachment_data BYTEA
+            """)
+            cur.execute("""
+                ALTER TABLE ticket_replies ADD COLUMN IF NOT EXISTS attachment_filename TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE ticket_replies ADD COLUMN IF NOT EXISTS attachment_content_type TEXT
+            """)
+            cur.execute("""
+                ALTER TABLE ticket_replies ADD COLUMN IF NOT EXISTS attachment_data BYTEA
+            """)
 
 
 def dict_cursor(conn):

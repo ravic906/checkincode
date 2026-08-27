@@ -322,8 +322,9 @@ table.admin-table tr.clickable:hover td { background: var(--panel-2); }
 .ticket-replies { margin: 4px 0 12px; padding-left: 14px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
 .ticket-reply-text { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
 .ticket-reply-form { display: flex; gap: 8px; align-items: flex-start; }
+.ticket-reply-form-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .ticket-reply-form textarea {
-  flex: 1;
+  width: 100%;
   min-height: 60px;
   resize: vertical;
   background: var(--panel-2);
@@ -335,6 +336,22 @@ table.admin-table tr.clickable:hover td { background: var(--panel-2); }
   font-family: inherit;
 }
 .ticket-reply-form textarea:focus { outline: none; border-color: var(--accent); }
+.ticket-reply-file { font-size: 12px; color: var(--muted); max-width: 100%; }
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(79,140,255,0.1);
+  border: 1px solid rgba(79,140,255,0.3);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin: 4px 0;
+}
+.attachment-chip:hover { background: rgba(79,140,255,0.18); }
 .loading-dots { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
 .error-banner {
   background: rgba(227,86,74,0.1);
