@@ -1309,6 +1309,45 @@ def interview_turn(
         }
 
 
+_TREND_DIP_WORDS = ("dip", "drop", "decreas", "declin", "lower", "regress", "worse", "slip")
+_TREND_IMPROVE_WORDS = ("improv", "increas", "better", "progress", "grew", "grow", "stronger", "gain")
+_TREND_STEADY_WORDS = ("steady", "consisten", "similar", "held", "stable", "unchanged", "same")
+
+
+def _validate_trend_note(trend_note: str | None, topic_scores: list[dict], topic_history: dict | None) -> str | None:
+    """[Feedback Generator] Deterministic backstop on trend_note, same
+    "don't trust a free-form claim for something structurally important"
+    precedent as the topic_scores coverage filter above it -- confirmed
+    live: the model claimed a topic's score "dipped since their last
+    interview" when the actual score was IDENTICAL both times (a real,
+    plausible-sounding but factually wrong claim, exactly the kind of
+    thing the prompt's "grounded ONLY in these real numbers" instruction
+    was meant to prevent but can't fully guarantee on its own).
+
+    Computes the real score deltas for every topic this interview shares
+    with topic_history, then checks trend_note's own wording for a
+    dip/improve/steady claim that contradicts the actual net direction --
+    nulls it out on any mismatch rather than trying to rewrite it, since a
+    missing trend note is far less harmful than a wrong one."""
+    if not trend_note or not topic_history:
+        return trend_note
+    deltas = [
+        t["score"] - topic_history[t["topic"]][0]["score"]
+        for t in topic_scores
+        if t.get("topic") in topic_history and topic_history[t["topic"]]
+    ]
+    if not deltas:
+        return trend_note  # nothing to check it against -- leave as the model wrote it
+    net = sum(deltas)
+    note_lower = trend_note.lower()
+    claims_dip = any(w in note_lower for w in _TREND_DIP_WORDS)
+    claims_improve = any(w in note_lower for w in _TREND_IMPROVE_WORDS)
+    claims_steady = any(w in note_lower for w in _TREND_STEADY_WORDS)
+    if (claims_dip and net >= 0) or (claims_improve and net <= 0) or (claims_steady and net != 0):
+        return None
+    return trend_note
+
+
 def _feedback_system_prompt(target_role: str, topic_history: dict | None = None) -> str:
     """[Feedback Generator] Builds the feedback-report system prompt,
     scoped to the role's blended topic list (not the old SQL-only
@@ -1410,7 +1449,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
         ]
         report.setdefault("question_notes", [])
         report.setdefault("next_practice_plan", [])
-        report.setdefault("trend_note", None)
+        report["trend_note"] = _validate_trend_note(report.get("trend_note"), report["topic_scores"], topic_history)
     except (json.JSONDecodeError, KeyError):
         report = {
             "overall_summary": result["reply"],
