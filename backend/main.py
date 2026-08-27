@@ -1191,12 +1191,23 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             target_role=session.get("target_role") or "Data Analyst",
             candidate_profile=session.get("candidate_profile"),
         )
+        # Whether this pass actually moved to a different topic -- NOT
+        # result["action"] != "switch_topic", which trusts a label already
+        # confirmed unreliable elsewhere this session (update_topic_tracking
+        # keys off topic-string equality for the same reason). Confirmed
+        # live: a candidate's clear "I honestly have no idea" correctly set
+        # candidate_stuck=True, but the model's first pass ALSO claimed
+        # action="switch_topic" while keeping the identical topic string --
+        # trusting that label skipped the immediate re-run entirely, so the
+        # "stuck" candidate got a same-topic rephrase instead of the
+        # guaranteed-fresh-topic this backstop exists to provide.
+        is_real_switch = result["topic"] != session["current_topic"]
         hint_cap_hit = (
             result.get("offer_hint")
             and session.get("hint_used_this_topic")
-            and result["action"] != "switch_topic"
+            and not is_real_switch
         )
-        if (result.get("candidate_stuck") and result["action"] != "switch_topic") or hint_cap_hit:
+        if (result.get("candidate_stuck") and not is_real_switch) or hint_cap_hit:
             # Two triggers for the same immediate-re-run pattern: a real
             # interviewer moves on after ONE clear "I don't know" (don't
             # rephrase and ask again), and doesn't offer a second hint on
