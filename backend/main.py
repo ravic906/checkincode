@@ -46,6 +46,7 @@ import db
 import topics
 import role_topics
 import support
+import email_sender
 import py_topics
 import stats_topics
 import data_lib_topics
@@ -372,6 +373,39 @@ def api_admin_set_ticket_status(ticket_id: int, req: SetTicketStatusRequest, req
     if not ticket:
         raise HTTPException(404, "Ticket not found.")
     return {"ticket": ticket}
+
+
+class TicketReplyRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/admin/tickets/{ticket_id}/reply")
+def api_admin_reply_to_ticket(ticket_id: int, req: TicketReplyRequest, request: Request):
+    """Sends an actual email to the ticket's submitter and records it in
+    the thread -- the whole point of inbuilt ticketing over the earlier
+    mailto:-link-only version, which only ever opened the admin's OWN mail
+    client rather than sending anything from the server."""
+    _require_admin(request)
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(400, "message is required.")
+    ticket = support.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found.")
+    if not ticket.get("email"):
+        raise HTTPException(400, "This ticket has no email address to reply to.")
+
+    try:
+        email_sender.send_email(
+            to=ticket["email"],
+            subject=f"Re: {ticket['subject']}",
+            body_text=message,
+        )
+    except RuntimeError as e:
+        raise HTTPException(502, f"Couldn't send the reply email ({e}).")
+
+    reply = support.add_reply(ticket_id, message)
+    return {"reply": reply}
 
 
 @app.get("/api/progress")

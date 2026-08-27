@@ -313,11 +313,28 @@ table.admin-table tr.clickable:hover td { background: var(--panel-2); }
 .ticket-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .ticket-subject { font-weight: 600; font-size: 14px; }
 .ticket-message { margin: 10px 0; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
-.ticket-card-actions { display: flex; align-items: center; gap: 12px; }
+.ticket-card-actions { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .ticket-reply-link { font-size: 12px; color: var(--accent); text-decoration: none; }
 .ticket-reply-link:hover { text-decoration: underline; }
 .pill.ticket-status-open { background: rgba(217,164,65,0.18); color: var(--amber); }
 .pill.ticket-status-resolved { background: rgba(56,193,114,0.15); color: var(--green); }
+
+.ticket-replies { margin: 4px 0 12px; padding-left: 14px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.ticket-reply-text { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+.ticket-reply-form { display: flex; gap: 8px; align-items: flex-start; }
+.ticket-reply-form textarea {
+  flex: 1;
+  min-height: 60px;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.ticket-reply-form textarea:focus { outline: none; border-color: var(--accent); }
 .loading-dots { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
 .error-banner {
   background: rgba(227,86,74,0.1);

@@ -10,9 +10,20 @@ initAdminSidebar("tickets");
 let allTickets = [];
 let currentStatus = "open";
 
+function renderReply(r) {
+  const when = r.created_at ? new Date(r.created_at).toLocaleString() : "—";
+  return `
+    <div class="ticket-reply">
+      <div class="user-sublabel">You replied · ${when}</div>
+      <p class="ticket-reply-text">${escapeHtml(r.message)}</p>
+    </div>
+  `;
+}
+
 function renderTicketCard(t) {
   const when = t.created_at ? new Date(t.created_at).toLocaleString() : "—";
   const resolvedWhen = t.resolved_at ? new Date(t.resolved_at).toLocaleString() : null;
+  const replies = t.replies || [];
   return `
     <div class="ticket-card" data-ticket-id="${t.id}">
       <div class="ticket-card-header">
@@ -23,13 +34,19 @@ function renderTicketCard(t) {
         <span class="pill ticket-status-${t.status}">${t.status === "resolved" ? "Resolved" : "Open"}</span>
       </div>
       <p class="ticket-message">${escapeHtml(t.message)}</p>
+      ${replies.length ? `<div class="ticket-replies">${replies.map(renderReply).join("")}</div>` : ""}
       <div class="ticket-card-actions">
         ${t.status === "open"
           ? `<button class="history-load-btn" data-action="resolve">Mark Resolved</button>`
           : `<button class="history-load-btn" data-action="reopen">Reopen</button>`}
-        <a class="ticket-reply-link" href="mailto:${encodeURIComponent(t.email || "")}?subject=${encodeURIComponent("Re: " + t.subject)}">Reply by email</a>
         ${resolvedWhen ? `<span class="user-sublabel">Resolved ${resolvedWhen}</span>` : ""}
       </div>
+      ${t.email ? `
+        <form class="ticket-reply-form" data-reply-form>
+          <textarea placeholder="Write a reply…" required></textarea>
+          <button type="submit" class="submit-btn">Send Reply</button>
+        </form>
+      ` : `<p class="empty-note">No email on file for this ticket -- can't reply.</p>`}
     </div>
   `;
 }
@@ -42,21 +59,46 @@ function renderTickets(tickets) {
   list.querySelectorAll(".ticket-card").forEach((card) => {
     const id = Number(card.dataset.ticketId);
     const btn = card.querySelector("[data-action]");
-    if (!btn) return;
-    btn.onclick = async () => {
-      const newStatus = btn.dataset.action === "resolve" ? "resolved" : "open";
-      btn.disabled = true;
-      try {
-        await adminApi(`/api/admin/tickets/${id}/status`, {
-          method: "POST",
-          body: JSON.stringify({ status: newStatus }),
-        });
-        await loadTickets();
-      } catch (err) {
-        alert(`Couldn't update ticket: ${err.message}`);
-        btn.disabled = false;
-      }
-    };
+    if (btn) {
+      btn.onclick = async () => {
+        const newStatus = btn.dataset.action === "resolve" ? "resolved" : "open";
+        btn.disabled = true;
+        try {
+          await adminApi(`/api/admin/tickets/${id}/status`, {
+            method: "POST",
+            body: JSON.stringify({ status: newStatus }),
+          });
+          await loadTickets();
+        } catch (err) {
+          alert(`Couldn't update ticket: ${err.message}`);
+          btn.disabled = false;
+        }
+      };
+    }
+
+    const replyForm = card.querySelector("[data-reply-form]");
+    if (replyForm) {
+      replyForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const textarea = replyForm.querySelector("textarea");
+        const message = textarea.value.trim();
+        if (!message) return;
+        const sendBtn = replyForm.querySelector("button");
+        sendBtn.disabled = true;
+        sendBtn.textContent = "Sending…";
+        try {
+          await adminApi(`/api/admin/tickets/${id}/reply`, {
+            method: "POST",
+            body: JSON.stringify({ message }),
+          });
+          await loadTickets();
+        } catch (err) {
+          alert(`Couldn't send reply: ${err.message}`);
+          sendBtn.disabled = false;
+          sendBtn.textContent = "Send Reply";
+        }
+      };
+    }
   });
 }
 

@@ -376,6 +376,21 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_support_tickets_status_created
                     ON support_tickets (status, created_at)
             """)
+            # One row per admin reply actually emailed out for a ticket --
+            # separate from support_tickets itself so a ticket can have a
+            # real back-and-forth thread, not just a single response.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_replies (
+                    id SERIAL PRIMARY KEY,
+                    ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket
+                    ON ticket_replies (ticket_id, created_at)
+            """)
 
 
 def dict_cursor(conn):
