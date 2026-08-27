@@ -1365,6 +1365,18 @@ def interview_turn(
         # above and the candidate_stuck override in main.py.
         if action == "switch_topic" and topic not in topics:
             topic = topics[0]
+        # Same "intro" mislabeling, different action: QA found the model
+        # will sometimes echo topic="intro" on a follow_up turn even long
+        # after skip_intro started the interview on a real topic (i.e.
+        # current_topic was never actually "intro" this session). Left
+        # uncorrected, update_topic_tracking (interview.py) sees that as a
+        # genuine topic change -- current_topic flips to "intro",
+        # topics_covered gets polluted with a non-real topic, and the
+        # candidate gets a confused "let's go back to..." moment. "intro"
+        # is only ever a legitimate follow_up label when the session is
+        # actually still on the intro (current_topic is None/"intro").
+        if action == "follow_up" and topic == "intro" and current_topic not in (None, "intro"):
+            topic = current_topic
         return {
             "action": action,
             "topic": topic,
