@@ -216,7 +216,15 @@ def find_user_id(identifier: str) -> str | None:
     the raw Clerk id from memory. Tries an exact id match first (cheapest,
     and the only case that matters for anonymous/non-Clerk ids, which have
     no email/username to match on anyway), then falls back to a case-
-    insensitive email or username match. Returns None if nothing matches."""
+    insensitive email or username match. Returns None if nothing matches.
+
+    When more than one row shares the same email/username (a real,
+    confirmed scenario -- an anonymous browser-local row can end up with
+    the same email as someone's later, genuine Clerk sign-in, e.g. via
+    /api/usage's X-User-Email capture firing before they ever sign in),
+    a verified `clerk:`-prefixed id is always preferred over an anonymous
+    one -- confirmed live: without this, granting admin by email picked
+    the stale anonymous row instead of the real signed-in account."""
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id FROM users WHERE id = %s", (identifier,))
@@ -224,7 +232,12 @@ def find_user_id(identifier: str) -> str | None:
             if row:
                 return row[0]
             cur.execute(
-                "SELECT id FROM users WHERE lower(email) = lower(%s) OR lower(username) = lower(%s) LIMIT 1",
+                """
+                SELECT id FROM users
+                WHERE lower(email) = lower(%s) OR lower(username) = lower(%s)
+                ORDER BY (id LIKE 'clerk:%%') DESC
+                LIMIT 1
+                """,
                 (identifier, identifier),
             )
             row = cur.fetchone()
