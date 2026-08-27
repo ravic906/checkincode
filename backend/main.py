@@ -461,12 +461,22 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
             result["output"] = graded["output"]
             if not graded["passed"]:
                 result["error"] = graded["error"]
-        problems_module.record_submission(user_id, problem["id"], result["correct"])
+        problems_module.record_submission(user_id, problem["id"], result["correct"], req.query)
         return result
 
     result = _grade_sql_submission(problem, req.query)
-    problems_module.record_submission(user_id, problem["id"], result["correct"])
+    problems_module.record_submission(user_id, problem["id"], result["correct"], req.query)
     return result
+
+
+@app.get("/api/submissions/{problem_id}")
+def api_my_submissions_for_problem(problem_id: str, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """A signed-in-or-anonymous user's own past attempts at one problem
+    (query/code/answer text, pass/fail, when) -- self-service, not an
+    admin endpoint: scoped to the caller's own resolved identity only, so
+    this can never reveal another user's submissions."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    return {"submissions": problems_module.get_user_submissions_for_problem(user_id, problem_id)}
 
 
 def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = None) -> dict:
@@ -637,7 +647,7 @@ def api_case_submit(req: CaseSubmitRequest, x_user_id: str = Header(default=None
         # category charts and per-user history) with a pass threshold, so
         # this track shows up in the same admin/user views without a
         # parallel table just for its own history.
-        problems_module.record_submission(user_id, problem["id"], (result.get("score") or 0) >= 70)
+        problems_module.record_submission(user_id, problem["id"], (result.get("score") or 0) >= 70, req.answer)
 
     return result
 

@@ -239,6 +239,65 @@ function closeSubscriptionModal() {
   if (overlay) overlay.style.display = "none";
 }
 
+function closeHistoryModal() {
+  const overlay = document.getElementById("historyOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+// kind: "code" (loads back into the Monaco editor -- SQL or Python, same
+// mechanism either way) or "case" (loads back into the plain answer
+// textarea, no editor involved). Scoped to the CALLER's own submissions
+// only -- see api_my_submissions_for_problem in main.py.
+async function openSubmissionHistoryModal(problemId, kind) {
+  const overlay = document.getElementById("historyOverlay");
+  const body = document.getElementById("historyBody");
+  overlay.style.display = "flex";
+  body.innerHTML = `<div class="loading-dots">Loading your past attempts…</div>`;
+
+  let submissions;
+  try {
+    const res = await api(`/api/submissions/${problemId}`);
+    submissions = res.submissions;
+  } catch (e) {
+    body.innerHTML = `<div class="error-banner">Couldn't load submission history: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  if (!submissions.length) {
+    body.innerHTML = `<div class="empty-state">No previous submissions for this problem yet.</div>`;
+    return;
+  }
+
+  // query_text is null for anything submitted before this feature shipped
+  // -- shown as "not saved" rather than an empty code block.
+  body.innerHTML = submissions.map((s, i) => {
+    const when = new Date(s.submitted_at).toLocaleString();
+    return `
+      <div class="history-entry">
+        <div class="history-entry-header">
+          <span class="pill history-status-${s.correct ? "correct" : "incorrect"}">${s.correct ? "Passed" : "Failed"}</span>
+          <span class="history-entry-time">${when}</span>
+          ${s.query_text ? `<button class="history-load-btn" data-idx="${i}" type="button">Load this</button>` : `<span class="history-no-text">Text not saved</span>`}
+        </div>
+        ${s.query_text ? `<pre class="history-entry-code">${escapeHtml(s.query_text)}</pre>` : ""}
+      </div>
+    `;
+  }).join("");
+
+  body.querySelectorAll(".history-load-btn").forEach((btn) => {
+    btn.onclick = () => {
+      const text = submissions[Number(btn.dataset.idx)].query_text;
+      if (kind === "case") {
+        const el = document.getElementById("caseAnswer");
+        if (el) el.value = text;
+      } else if (monacoEditor) {
+        monacoEditor.setValue(text);
+      }
+      closeHistoryModal();
+    };
+  });
+}
+
 // renderSubscriptionSettingsPage(el) fetches its own fresh usage snapshot
 // each time it's called, rather than relying on state cached elsewhere.
 async function renderSubscriptionSettingsPage(el) {
@@ -780,6 +839,7 @@ async function loadProblem(id) {
         <div class="editor-toolbar">
           <strong>Your Code</strong>
           <div class="actions">
+            <button class="history-btn" id="historyBtn">History</button>
             <button class="run-btn" id="runBtn">Run</button>
             <button class="submit-btn" id="submitBtn">Submit</button>
           </div>
@@ -810,6 +870,7 @@ async function loadProblem(id) {
         <div class="editor-toolbar">
           <strong>Your Query</strong>
           <div class="actions">
+            <button class="history-btn" id="historyBtn">History</button>
             <button class="run-btn" id="runBtn">Run</button>
             <button class="submit-btn" id="submitBtn">Submit</button>
           </div>
@@ -823,6 +884,7 @@ async function loadProblem(id) {
 
   document.getElementById("runBtn").onclick = () => runQuery(false);
   document.getElementById("submitBtn").onclick = () => runQuery(true);
+  document.getElementById("historyBtn").onclick = () => openSubmissionHistoryModal(p.id, "code");
 }
 
 // Business Case track -- no Monaco, no execution grading. A plain
@@ -841,6 +903,7 @@ function renderCaseProblem(p) {
       <div class="editor-toolbar">
         <strong>Your Answer</strong>
         <div class="actions">
+          <button class="history-btn" id="historyBtn">History</button>
           <button class="submit-btn" id="caseSubmitBtn">Submit for Feedback</button>
         </div>
       </div>
@@ -849,6 +912,7 @@ function renderCaseProblem(p) {
     <div class="results-section" id="resultsSection"></div>
   `;
   document.getElementById("caseSubmitBtn").onclick = () => submitCaseAnswer(p.id);
+  document.getElementById("historyBtn").onclick = () => openSubmissionHistoryModal(p.id, "case");
 }
 
 async function submitCaseAnswer(problemId) {
@@ -1228,6 +1292,11 @@ async function init() {
   document.getElementById("subscriptionClose").onclick = closeSubscriptionModal;
   document.getElementById("subscriptionOverlay").onclick = (e) => {
     if (e.target.id === "subscriptionOverlay") closeSubscriptionModal();
+  };
+
+  document.getElementById("historyClose").onclick = closeHistoryModal;
+  document.getElementById("historyOverlay").onclick = (e) => {
+    if (e.target.id === "historyOverlay") closeHistoryModal();
   };
 
   document.getElementById("brandHome").onclick = showHome;

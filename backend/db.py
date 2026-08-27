@@ -217,6 +217,14 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_submissions_user_problem
                 ON submissions (user_id, problem_id)
             """)
+            # Migration: the actual submitted code/answer was never stored,
+            # only correct/timestamp -- added so a user can look back at
+            # what they wrote on a past attempt at a given problem, not
+            # just whether it passed. NULL on every pre-existing row (the
+            # text is simply gone for those), populated going forward.
+            cur.execute("""
+                ALTER TABLE submissions ADD COLUMN IF NOT EXISTS query_text TEXT
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,

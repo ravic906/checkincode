@@ -412,7 +412,7 @@ table.data-table td.null-val { color: var(--muted); font-style: italic; }
 .rubric-checklist li.rubric-hit::marker { color: #38c172; }
 .rubric-checklist li.rubric-missed { color: var(--muted); }
 
-button.run-btn, button.submit-btn {
+button.run-btn, button.submit-btn, button.history-btn {
   border: none;
   border-radius: 8px;
   padding: 9px 18px;
@@ -422,7 +422,44 @@ button.run-btn, button.submit-btn {
 }
 button.run-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
 button.submit-btn { background: var(--accent); color: white; }
+button.history-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+button.history-btn:hover { color: var(--text); background: var(--panel-2); }
 button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.history-entry {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.history-entry:last-child { border-bottom: none; }
+.history-entry-header { display: flex; align-items: center; gap: 10px; }
+.history-entry-time { font-size: 12px; color: var(--muted); flex: 1; }
+.history-no-text { font-size: 12px; color: var(--muted); font-style: italic; }
+.history-load-btn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-load-btn:hover { background: var(--accent); color: white; }
+.history-entry-code {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.pill.history-status-correct { background: rgba(56,193,114,0.15); color: var(--green); }
+.pill.history-status-incorrect { background: rgba(227,86,74,0.15); color: var(--red); }
 
 #editor {
   height: 220px;
