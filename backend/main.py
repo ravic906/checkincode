@@ -676,6 +676,14 @@ def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = Non
         # has no way to tell a hidden-dataset failure apart from a mistake
         # against the sample they can actually see).
         result["is_hidden_case"] = outcome["failed_index"] > 0
+        # Beyond hidden-vs-sample, a candidate with several datasets running
+        # (Submit especially) had no way to tell WHICH one broke, or how
+        # many were even checked -- "it failed somewhere" with no sense of
+        # scope. 1-indexed so it reads naturally ("case 2 of 5"), and
+        # total_cases lets the frontend show that even a pass-so-far Run
+        # only exercised a slice of the full Submit check.
+        result["failed_case_number"] = outcome["failed_index"] + 1
+    result["total_cases"] = len(all_seeds)
     return result
 
 

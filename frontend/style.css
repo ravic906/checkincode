@@ -548,7 +548,7 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .result-banner.pass { background: rgba(56,193,114,0.12); color: var(--green); border: 1px solid rgba(56,193,114,0.3); }
 .result-banner.fail { background: rgba(227,86,74,0.12); color: var(--red); border: 1px solid rgba(227,86,74,0.3); }
 
-.hidden-case-note, .hidden-case-upfront-note {
+.hidden-case-note, .hidden-case-upfront-note, .test-case-progress {
   font-size: 12.5px;
   color: var(--muted);
   background: var(--panel-2);
@@ -556,6 +556,11 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 14px;
+}
+
+.test-case-progress {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .upsell-box {

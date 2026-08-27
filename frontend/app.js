@@ -1173,6 +1173,17 @@ function renderResult(result, isPartialCheck = false) {
   } else {
     html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
 
+    if (result.failed_case_number && result.total_cases) {
+      // Naming the exact failing case (and how many ran) turns "it's wrong
+      // somewhere" into something a candidate can actually reason about --
+      // e.g. passing 3 sample-shaped cases but failing case 4 is a real
+      // signal (probably an edge case like NULLs or ties), not just noise.
+      const label = result.is_hidden_case
+        ? `hidden case ${result.failed_case_number}`
+        : "the sample data";
+      html += `<p class="test-case-progress">Failed on test case ${result.failed_case_number} of ${result.total_cases} (${label}) — the ones before it passed.</p>`;
+    }
+
     if (result.is_hidden_case) {
       html += `<p class="hidden-case-note">This check ran your query against one of our hidden verification datasets — different data than the "Sample Data" shown above, used to make sure your query works in general rather than just for that one example. The tables below show that hidden dataset's data, not the sample's.</p>`;
     }
