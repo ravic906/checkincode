@@ -234,22 +234,7 @@ def api_get_problem(problem_id: str, x_user_id: str = Header(default=None), auth
             "case_context": p.get("case_context"),
         }
 
-    con = duckdb.connect(":memory:", config={"enable_external_access": False})
-    try:
-        con.execute(p["schema_sql"])
-        con.execute(p["seed_sql"])
-        table_names = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
-        sample_tables = {}
-        for t in table_names:
-            quoted = '"' + t.replace('"', '""') + '"'
-            cols = [d[0] for d in con.execute(f"SELECT * FROM {quoted} LIMIT 0").description]
-            rows = con.execute(f"SELECT * FROM {quoted} LIMIT 15").fetchall()
-            sample_tables[t] = {
-                "columns": cols,
-                "rows": [[sandbox._normalize_cell(v) for v in r] for r in rows],
-            }
-    finally:
-        con.close()
+    sample_tables = _build_sample_tables(p["schema_sql"], p["seed_sql"])
 
     return {
         "id": p["id"],
@@ -573,6 +558,34 @@ def _preview(columns, rows, limit=10):
     return {"columns": columns, "rows": rows[:limit]}
 
 
+def _build_sample_tables(schema_sql: str, seed_sql: str) -> dict:
+    """
+    Seeds a throwaway in-memory DuckDB from `schema_sql`+`seed_sql` and
+    dumps every resulting table's columns/first-15-rows -- the same shape
+    the problem page's "Sample Data" panel renders. Factored out of
+    api_get_problem so _grade_sql_submission can build the identical
+    preview for whichever hidden test-case dataset a submission actually
+    failed against, not just the always-visible seed_sql one.
+    """
+    con = duckdb.connect(":memory:", config={"enable_external_access": False})
+    try:
+        con.execute(schema_sql)
+        con.execute(seed_sql)
+        table_names = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        sample_tables = {}
+        for t in table_names:
+            quoted = '"' + t.replace('"', '""') + '"'
+            cols = [d[0] for d in con.execute(f"SELECT * FROM {quoted} LIMIT 0").description]
+            rows = con.execute(f"SELECT * FROM {quoted} LIMIT 15").fetchall()
+            sample_tables[t] = {
+                "columns": cols,
+                "rows": [[sandbox._normalize_cell(v) for v in r] for r in rows],
+            }
+        return sample_tables
+    finally:
+        con.close()
+
+
 @app.post("/api/submit")
 def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)
@@ -683,6 +696,18 @@ def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = Non
         # total_cases lets the frontend show that even a pass-so-far Run
         # only exercised a slice of the full Submit check.
         result["failed_case_number"] = outcome["failed_index"] + 1
+        # The expected/actual *output* previews above aren't enough to
+        # debug a hidden-case failure -- they're the query's result, which
+        # may be filtered/aggregated/limited and hide the actual input
+        # data shape entirely. User feedback: "they need to look at the
+        # test case which failed", not just be told it failed. So also
+        # hand back that failing case's own input tables (same shape as
+        # the problem page's "Sample Data" panel) -- once a candidate has
+        # already failed a case, seeing its raw data is a debugging aid,
+        # not overfitting risk.
+        result["failed_case_tables"] = _build_sample_tables(
+            problem["schema_sql"], all_seeds[outcome["failed_index"]]
+        )
     result["total_cases"] = len(all_seeds)
     return result
 

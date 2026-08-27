@@ -1185,13 +1185,29 @@ function renderResult(result, isPartialCheck = false) {
     }
 
     if (result.is_hidden_case) {
-      html += `<p class="hidden-case-note">This check ran your query against one of our hidden verification datasets — different data than the "Sample Data" shown above, used to make sure your query works in general rather than just for that one example. The tables below show that hidden dataset's data, not the sample's.</p>`;
+      html += `<p class="hidden-case-note">This check ran your query against one of our hidden verification datasets — different data than the "Sample Data" shown above, used to make sure your query works in general rather than just for that one example.</p>`;
     }
 
     if (result.expected_preview || result.actual_preview) {
       html += `<div class="diff-preview">
         <div class="col"><h4>Expected (preview)</h4>${result.expected_preview ? renderPreviewTable(result.expected_preview) : "—"}</div>
         <div class="col"><h4>Your output (preview)</h4>${result.actual_preview ? renderPreviewTable(result.actual_preview) : "—"}</div>
+      </div>`;
+    }
+
+    if (result.failed_case_tables) {
+      // The expected/actual tables above are the query's OUTPUT, which can
+      // hide the underlying data (aggregated, filtered, limited columns).
+      // Showing this failing case's actual input tables lets a candidate
+      // trace exactly why their query produced the wrong output on this
+      // specific data, instead of just being told "wrong" with no way to
+      // inspect what was actually being queried.
+      const failTablesHtml = Object.entries(result.failed_case_tables)
+        .map(([name, table]) => renderTable(name, table))
+        .join("");
+      html += `<div class="failed-case-data">
+        <h4>Test data for this failing case</h4>
+        ${failTablesHtml}
       </div>`;
     }
 

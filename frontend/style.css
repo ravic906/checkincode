@@ -610,6 +610,9 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 .diff-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 .diff-preview .col h4 { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 0; }
 
+.failed-case-data { margin-bottom: 14px; }
+.failed-case-data > h4 { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 0 0 8px 0; }
+
 .loading-dots { color: var(--muted); font-size: 13px; }
 .ask-phoenix-hint { color: var(--muted); font-size: 13px; }
 .ask-phoenix-hint strong { color: var(--text); }
