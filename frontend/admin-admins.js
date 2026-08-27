@@ -13,26 +13,49 @@
 initAdminSidebar("admins");
 
 function renderAdminRow(a) {
-  const label = a.email || a.id;
+  const label = a.full_name || a.email || a.id;
+  const showIdSubLabel = label !== a.id;
   const since = a.created_at ? new Date(a.created_at).toLocaleDateString() : "—";
   return `
     <tr>
-      <td>${escapeHtml(label)}</td>
+      <td>
+        <div>${escapeHtml(label)}</div>
+        ${showIdSubLabel ? `<div class="user-sublabel">${escapeHtml(a.id)}</div>` : ""}
+      </td>
+      <td>${a.email ? escapeHtml(a.email) : "—"}</td>
+      <td>${a.username ? `@${escapeHtml(a.username)}` : "—"}</td>
       <td>${since}</td>
     </tr>
   `;
 }
 
+let allAdmins = [];
+
+function renderAdminRows(admins) {
+  const body = document.getElementById("adminsBody");
+  body.innerHTML = admins.length
+    ? admins.map(renderAdminRow).join("")
+    : `<tr><td colspan="4" class="empty-note">No admins match.</td></tr>`;
+}
+
+function applyAdminSearch() {
+  const q = document.getElementById("adminSearchInput").value.trim().toLowerCase();
+  if (!q) { renderAdminRows(allAdmins); return; }
+  const filtered = allAdmins.filter(a =>
+    [a.id, a.email, a.username, a.full_name].some(field => field && field.toLowerCase().includes(q))
+  );
+  renderAdminRows(filtered);
+}
+
 async function loadAdmins() {
   const body = document.getElementById("adminsBody");
-  body.innerHTML = `<tr><td colspan="2"><div class="loading-dots">Loading…</div></td></tr>`;
+  body.innerHTML = `<tr><td colspan="4"><div class="loading-dots">Loading…</div></td></tr>`;
   try {
     const data = await adminApi("/api/admin/admins");
-    body.innerHTML = data.admins.length
-      ? data.admins.map(renderAdminRow).join("")
-      : `<tr><td colspan="2" class="empty-note">No admins found.</td></tr>`;
+    allAdmins = data.admins;
+    renderAdminRows(allAdmins);
   } catch (err) {
-    body.innerHTML = `<tr><td colspan="2"><div class="error-banner">${escapeHtml(err.message)}</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="4"><div class="error-banner">${escapeHtml(err.message)}</div></td></tr>`;
   }
 }
 
@@ -46,16 +69,19 @@ async function fillMyUserId() {
 }
 
 async function setAdmin(isAdminValue) {
-  const userId = document.getElementById("setAdminUserId").value.trim();
-  if (!userId) return alert("Enter a user_id first (or click \"Use my account\").");
+  const identifier = document.getElementById("setAdminUserId").value.trim();
+  if (!identifier) return alert("Enter an email, username, or user_id first (or click \"Use my account\").");
   const verb = isAdminValue ? "Grant" : "Revoke";
-  if (!confirm(`${verb} admin rights for:\n${userId}?`)) return;
+  if (!confirm(`${verb} admin rights for:\n${identifier}?`)) return;
   try {
-    await adminApi("/api/admin/set-admin", {
+    // The backend resolves identifier (email/username/user_id) to the
+    // definitive stored user_id -- shown in the confirmation so it's
+    // clear exactly which account changed, not just what was typed.
+    const result = await adminApi("/api/admin/set-admin", {
       method: "POST",
-      body: JSON.stringify({ user_id: userId, is_admin: isAdminValue }),
+      body: JSON.stringify({ user_id: identifier, is_admin: isAdminValue }),
     });
-    alert(`Done -- ${userId} admin status is now ${isAdminValue}.`);
+    alert(`Done -- ${result.user_id} admin status is now ${isAdminValue}.`);
     await loadAdmins();
   } catch (err) {
     alert(`${verb} admin failed: ${err.message}`);
@@ -65,5 +91,6 @@ async function setAdmin(isAdminValue) {
 document.getElementById("fillMyUserIdBtn").onclick = fillMyUserId;
 document.getElementById("grantAdminBtn").onclick = () => setAdmin(true);
 document.getElementById("revokeAdminBtn").onclick = () => setAdmin(false);
+document.getElementById("adminSearchInput").addEventListener("input", applyAdminSearch);
 
 loadAdmins();

@@ -17,17 +17,16 @@ function renderSummary(summary) {
 
 function renderUserRow(u) {
   const label = u.full_name || u.email || u.id;
-  const subLabelParts = [];
-  if (u.full_name && u.email) subLabelParts.push(u.email);
-  if (u.username) subLabelParts.push(`@${u.username}`);
-  const subLabel = subLabelParts.join(" · ");
+  const showIdSubLabel = label !== u.id;
   const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : "—";
   return `
     <tr class="clickable" data-user-id="${escapeHtml(u.id)}">
       <td>
         <div>${escapeHtml(label)}</div>
-        ${subLabel ? `<div class="user-sublabel">${escapeHtml(subLabel)}</div>` : ""}
+        ${showIdSubLabel ? `<div class="user-sublabel">${escapeHtml(u.id)}</div>` : ""}
       </td>
+      <td>${u.email ? escapeHtml(u.email) : "—"}</td>
+      <td>${u.username ? `@${escapeHtml(u.username)}` : "—"}</td>
       <td><span class="pill tier-${u.tier}">${escapeHtml(u.tier)}</span></td>
       <td>${u.submissions_today}</td>
       <td>${u.total_submissions}</td>
@@ -86,27 +85,43 @@ async function toggleHistory(userId, rowEl) {
   }
 }
 
+let allUsers = [];
+
+function renderUserRows(users) {
+  const body = document.getElementById("usersBody");
+  body.innerHTML = users.length
+    ? users.map(renderUserRow).join("")
+    : `<tr><td colspan="9" class="empty-note">No users match.</td></tr>`;
+  body.querySelectorAll("tr.clickable").forEach(row => {
+    row.addEventListener("click", () => toggleHistory(row.dataset.userId, row));
+  });
+}
+
+function applyUserSearch() {
+  const q = document.getElementById("userSearchInput").value.trim().toLowerCase();
+  if (!q) { renderUserRows(allUsers); return; }
+  const filtered = allUsers.filter(u =>
+    [u.id, u.email, u.username, u.full_name].some(field => field && field.toLowerCase().includes(q))
+  );
+  renderUserRows(filtered);
+}
+
 async function loadUsers() {
   const body = document.getElementById("usersBody");
   const cards = document.getElementById("summaryCards");
-  body.innerHTML = `<tr><td colspan="7"><div class="loading-dots">Loading…</div></td></tr>`;
+  body.innerHTML = `<tr><td colspan="9"><div class="loading-dots">Loading…</div></td></tr>`;
   try {
-    const [summary, usersResp, breakdown] = await Promise.all([
+    const [summary, usersResp] = await Promise.all([
       adminApi("/api/admin/users/summary"),
       adminApi("/api/admin/users"),
-      adminApi("/api/admin/stats/solved-by-category"),
     ]);
     cards.innerHTML = renderSummary(summary);
-    document.getElementById("categoryChart").innerHTML = renderCategoryPie(breakdown, 140);
-    body.innerHTML = usersResp.users.length
-      ? usersResp.users.map(renderUserRow).join("")
-      : `<tr><td colspan="7" class="empty-note">No users yet.</td></tr>`;
-    body.querySelectorAll("tr.clickable").forEach(row => {
-      row.addEventListener("click", () => toggleHistory(row.dataset.userId, row));
-    });
+    allUsers = usersResp.users;
+    renderUserRows(allUsers);
   } catch (err) {
-    body.innerHTML = `<tr><td colspan="7"><div class="error-banner">${escapeHtml(err.message)}</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="9"><div class="error-banner">${escapeHtml(err.message)}</div></td></tr>`;
   }
 }
 
+document.getElementById("userSearchInput").addEventListener("input", applyUserSearch);
 loadUsers();

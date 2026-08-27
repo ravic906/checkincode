@@ -209,10 +209,32 @@ def get_activity(user_id: str, limit: int = 300) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def find_user_id(identifier: str) -> str | None:
+    """Resolves an admin-portal-friendly identifier (email, username, or
+    an already-raw user id like `clerk:user_xxx`) to the definitive stored
+    user id, so admin-admins.js's grant/revoke form doesn't require typing
+    the raw Clerk id from memory. Tries an exact id match first (cheapest,
+    and the only case that matters for anonymous/non-Clerk ids, which have
+    no email/username to match on anyway), then falls back to a case-
+    insensitive email or username match. Returns None if nothing matches."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE id = %s", (identifier,))
+            row = cur.fetchone()
+            if row:
+                return row[0]
+            cur.execute(
+                "SELECT id FROM users WHERE lower(email) = lower(%s) OR lower(username) = lower(%s) LIMIT 1",
+                (identifier, identifier),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 def list_admins() -> list[dict]:
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
-            cur.execute("SELECT id, email, created_at FROM users WHERE is_admin = TRUE ORDER BY created_at")
+            cur.execute("SELECT id, email, username, full_name, created_at FROM users WHERE is_admin = TRUE ORDER BY created_at")
             return [dict(r) for r in cur.fetchall()]
 
 

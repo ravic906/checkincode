@@ -38,20 +38,20 @@
       <div id="errorArea"></div>
       <div class="stat-grid" id="summaryCards"></div>
 
-      <div class="card">
-        <div class="section-title">Solved problems, platform-wide</div>
-        <div id="categoryChart"></div>
-      </div>
-
       <div id="historyPanel"></div>
 
       <div class="card">
-        <div class="section-title">All Users</div>
+        <div class="section-title-row">
+          <div class="section-title">All Users</div>
+          <input type="search" id="userSearchInput" class="admin-search-input" placeholder="Search by name, email, username, or ID…" />
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
                 <th>User</th>
+                <th>Email</th>
+                <th>Username</th>
                 <th>Tier</th>
                 <th>Submissions Today</th>
                 <th>Total Submissions</th>

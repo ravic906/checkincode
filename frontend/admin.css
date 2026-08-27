@@ -195,6 +195,21 @@ body {
   margin: 0 0 12px;
 }
 
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.section-title-row .section-title { margin: 0; }
+.admin-search-input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--text);
+  width: 280px;
+  max-width: 100%;
+}
+.admin-search-input:focus { outline: none; border-color: var(--accent); }
+.admin-search-input::placeholder { color: var(--muted); }
+
 /* ---------- Tabs ---------- */
 
 .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }

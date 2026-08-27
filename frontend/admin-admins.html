@@ -38,12 +38,17 @@
       <div id="errorArea"></div>
 
       <div class="card">
-        <div class="section-title">Current Admins</div>
+        <div class="section-title-row">
+          <div class="section-title">Current Admins</div>
+          <input type="search" id="adminSearchInput" class="admin-search-input" placeholder="Search by name, email, username, or ID…" />
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
-                <th>Email / ID</th>
+                <th>User</th>
+                <th>Email</th>
+                <th>Username</th>
                 <th>Admin Since</th>
               </tr>
             </thead>
@@ -54,9 +59,9 @@
 
       <div class="card">
         <div class="section-title">Grant / Revoke Admin</div>
-        <p class="subtitle" style="margin:0;">Enter the target account's user_id. This never lets an account claim admin for itself with no gate -- the action still requires the admin token or an already-admin session to take effect.</p>
+        <p class="subtitle" style="margin:0;">Enter the target account's email, username, or user_id. This never lets an account claim admin for itself with no gate -- the action still requires the admin token or an already-admin session to take effect.</p>
         <div class="admin-form-row">
-          <input type="text" id="setAdminUserId" placeholder="user_id to grant/revoke admin" />
+          <input type="text" id="setAdminUserId" placeholder="Email, username, or user_id" />
           <button class="btn btn-sm" id="fillMyUserIdBtn" title="Sign in above first, fills in your own user_id">Use my account</button>
           <button class="btn btn-success btn-sm" id="grantAdminBtn">Grant Admin</button>
           <button class="btn btn-danger btn-sm" id="revokeAdminBtn">Revoke Admin</button>

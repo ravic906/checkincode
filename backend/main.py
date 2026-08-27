@@ -1990,18 +1990,26 @@ class SetAdminRequest(BaseModel):
 @app.post("/api/admin/set-admin")
 def api_admin_set_admin(req: SetAdminRequest, request: Request):
     """
-    Grants or revokes admin rights for an explicit target user_id --
-    same shape as /api/admin/set-tier. Gated by the normal
-    _require_admin() (static token, or an existing Clerk admin), so only
-    someone who is already an admin (or holds the bootstrap token) can
-    designate anyone else as one. Deliberately NOT self-service: there is
-    no "grant myself admin" call a signed-in-but-unprivileged account can
-    make on its own -- the owner looks up the target's user_id (see
-    /api/whoami) and grants it explicitly.
+    Grants or revokes admin rights for a target user -- same shape as
+    /api/admin/set-tier. Gated by the normal _require_admin() (static
+    token, or an existing Clerk admin), so only someone who is already an
+    admin (or holds the bootstrap token) can designate anyone else as one.
+    Deliberately NOT self-service: there is no "grant myself admin" call a
+    signed-in-but-unprivileged account can make on its own.
+
+    req.user_id accepts an email, a username, or a raw user id (the old
+    "look up the target's user_id via /api/whoami and paste it" flow still
+    works) -- resolved via users.find_user_id, which requires an existing
+    matching account. Rejects with 404 rather than silently creating a
+    fresh admin-flagged user row for a typo'd identifier that matches no
+    one.
     """
     _require_admin(request)
-    users_module.set_admin(req.user_id, req.is_admin)
-    return {"user_id": req.user_id, "is_admin": req.is_admin}
+    resolved_id = users_module.find_user_id(req.user_id)
+    if not resolved_id:
+        raise HTTPException(404, f"No user found matching '{req.user_id}' (checked as a user id, email, and username).")
+    users_module.set_admin(resolved_id, req.is_admin)
+    return {"user_id": resolved_id, "is_admin": req.is_admin}
 
 
 @app.get("/api/admin/admins")
