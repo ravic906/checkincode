@@ -45,6 +45,7 @@ import tts
 import db
 import topics
 import role_topics
+import support
 import py_topics
 import stats_topics
 import data_lib_topics
@@ -116,6 +117,16 @@ ACTIVITY_EVENT_TYPES = {"viewed_sql_track", "viewed_python_track", "viewed_case_
 class LogActivityRequest(BaseModel):
     event_type: str
     metadata: dict | None = None
+
+
+MAX_SUPPORT_SUBJECT_LEN = 200
+MAX_SUPPORT_MESSAGE_LEN = 5000
+
+
+class SupportTicketRequest(BaseModel):
+    subject: str
+    message: str
+    email: str  # always collected in the contact form itself (pre-filled from Clerk when signed in, editable) -- a bare user_id isn't something a human can reply to
 
 
 class AskPhoenixRequest(BaseModel):
@@ -312,6 +323,55 @@ def api_log_activity(req: LogActivityRequest, x_user_id: str = Header(default=No
     user_id = auth.resolve_user_id(authorization, x_user_id)
     users_module.record_activity(user_id, req.event_type, req.metadata)
     return {"logged": True}
+
+
+@app.post("/api/support/tickets")
+def api_create_support_ticket(req: SupportTicketRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Inbuilt support ticketing -- previously there was no way at all for a
+    user to reach the team from within the product. Deliberately open to
+    anonymous callers too (support access shouldn't depend on being signed
+    in, especially since sign-in itself is one of the things that could be
+    broken); user_id is whatever auth.resolve_user_id resolves to, for
+    context, but email is what actually makes a ticket actionable.
+    """
+    subject = req.subject.strip()
+    message = req.message.strip()
+    email = req.email.strip()
+    if not subject or not message or not email:
+        raise HTTPException(400, "subject, message, and email are all required.")
+    if len(subject) > MAX_SUPPORT_SUBJECT_LEN:
+        raise HTTPException(413, f"Subject too long -- {MAX_SUPPORT_SUBJECT_LEN} characters max.")
+    if len(message) > MAX_SUPPORT_MESSAGE_LEN:
+        raise HTTPException(413, f"Message too long -- {MAX_SUPPORT_MESSAGE_LEN} characters max.")
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    ticket = support.create_ticket(user_id, email, subject, message)
+    return {"ticket": ticket}
+
+
+@app.get("/api/admin/tickets")
+def api_admin_list_tickets(request: Request, status: str | None = None):
+    """Support ticket queue for the admin portal. `status` ("open"/
+    "resolved") filters to just that state; omitted, returns everything."""
+    _require_admin(request)
+    if status and status not in ("open", "resolved"):
+        raise HTTPException(400, "status must be 'open' or 'resolved'.")
+    return {"tickets": support.list_tickets(status)}
+
+
+class SetTicketStatusRequest(BaseModel):
+    status: str
+
+
+@app.post("/api/admin/tickets/{ticket_id}/status")
+def api_admin_set_ticket_status(ticket_id: int, req: SetTicketStatusRequest, request: Request):
+    _require_admin(request)
+    if req.status not in ("open", "resolved"):
+        raise HTTPException(400, "status must be 'open' or 'resolved'.")
+    ticket = support.set_ticket_status(ticket_id, req.status)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found.")
+    return {"ticket": ticket}
 
 
 @app.get("/api/progress")

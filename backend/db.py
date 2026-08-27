@@ -355,6 +355,27 @@ def init_schema():
                 CREATE INDEX IF NOT EXISTS idx_activity_events_user_created
                     ON user_activity_events (user_id, created_at)
             """)
+            # Inbuilt support ticketing -- there was previously no way at
+            # all for a user to reach the team from within the product.
+            # email is always captured (even for a signed-in user, whose
+            # `user_id` alone isn't something a human can reply to) so a
+            # ticket is always actionable regardless of sign-in state.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS support_tickets (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    email TEXT,
+                    subject TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    resolved_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_support_tickets_status_created
+                    ON support_tickets (status, created_at)
+            """)
 
 
 def dict_cursor(conn):

@@ -244,6 +244,54 @@ function closeHistoryModal() {
   if (overlay) overlay.style.display = "none";
 }
 
+function closeContactModal() {
+  const overlay = document.getElementById("contactOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+// Deliberately independent of Clerk/sign-in state -- support access
+// shouldn't depend on auth actually working, especially since a Clerk
+// load failure is a real thing that's happened (blank auth area, no way
+// to sign in or out). Pre-fills email when a signed-in identity is
+// available, but the field stays editable/required either way so a
+// ticket is always actionable even when nothing else on the page's
+// auth-dependent code ran successfully.
+function openContactModal() {
+  const overlay = document.getElementById("contactOverlay");
+  const body = document.getElementById("contactBody");
+  overlay.style.display = "flex";
+
+  const prefillEmail = (typeof currentUserEmail === "function" && currentUserEmail()) || "";
+  body.innerHTML = `
+    <form id="contactForm" class="contact-form">
+      <label>Your email<input type="email" id="contactEmail" required value="${escapeHtml(prefillEmail)}" placeholder="you@example.com" /></label>
+      <label>Subject<input type="text" id="contactSubject" required maxlength="200" placeholder="What's this about?" /></label>
+      <label>Message<textarea id="contactMessage" required maxlength="5000" rows="6" placeholder="Tell us what's going on…"></textarea></label>
+      <div id="contactFormError"></div>
+      <button type="submit" class="submit-btn" id="contactSubmitBtn">Send</button>
+    </form>
+  `;
+
+  document.getElementById("contactForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("contactEmail").value.trim();
+    const subject = document.getElementById("contactSubject").value.trim();
+    const message = document.getElementById("contactMessage").value.trim();
+    const errorEl = document.getElementById("contactFormError");
+    const btn = document.getElementById("contactSubmitBtn");
+    errorEl.textContent = "";
+    if (!email || !subject || !message) return;
+    btn.disabled = true;
+    try {
+      await api("/api/support/tickets", { method: "POST", body: JSON.stringify({ email, subject, message }) });
+      body.innerHTML = `<p class="contact-form-sent">Thanks — we've got your message and will get back to you at ${escapeHtml(email)}.</p>`;
+    } catch (err) {
+      errorEl.textContent = err.message || "Couldn't send that. Try again in a moment.";
+      btn.disabled = false;
+    }
+  };
+}
+
 // kind: "code" (loads back into the Monaco editor -- SQL or Python, same
 // mechanism either way) or "case" (loads back into the plain answer
 // textarea, no editor involved). Scoped to the CALLER's own submissions
@@ -1303,6 +1351,12 @@ async function init() {
   document.getElementById("historyClose").onclick = closeHistoryModal;
   document.getElementById("historyOverlay").onclick = (e) => {
     if (e.target.id === "historyOverlay") closeHistoryModal();
+  };
+
+  document.getElementById("contactSupportBtn").onclick = openContactModal;
+  document.getElementById("contactClose").onclick = closeContactModal;
+  document.getElementById("contactOverlay").onclick = (e) => {
+    if (e.target.id === "contactOverlay") closeContactModal();
   };
 
   document.getElementById("brandHome").onclick = showHome;

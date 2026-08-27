@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PhoenixPrep — Admin: Dashboard</title>
+<title>PhoenixPrep — Admin: Tickets</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="admin.css" />
@@ -32,23 +32,25 @@
     <main class="admin-main">
       <div class="admin-page-header">
         <div>
-          <h1>Dashboard</h1>
-          <p class="subtitle">Overview of users and content across PhoenixPrep.</p>
+          <h1>Tickets</h1>
+          <p class="subtitle">Support requests submitted from the site's "Help" form.</p>
         </div>
       </div>
 
       <div id="errorArea"></div>
-      <div class="stat-grid" id="statGrid"></div>
-      <p id="lastBatchNote" class="subtitle" style="margin: -8px 0 20px;"></p>
+
+      <div class="tabs" id="ticketTabs">
+        <button class="tab active" data-status="open">Open</button>
+        <button class="tab" data-status="resolved">Resolved</button>
+        <button class="tab" data-status="">All</button>
+      </div>
 
       <div class="card">
-        <div class="section-title">Quick links</div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:6px;">
-          <a class="btn" href="admin.html">Review pending drafts →</a>
-          <a class="btn" href="admin-users.html">Browse users →</a>
-          <a class="btn" href="admin-tickets.html">View support tickets →</a>
-          <a class="btn" href="admin-admins.html">Manage admins →</a>
+        <div class="section-title-row">
+          <div class="section-title">Tickets</div>
+          <input type="search" id="ticketSearchInput" class="admin-search-input" placeholder="Search by email, subject, or message…" />
         </div>
+        <div id="ticketsList"></div>
       </div>
     </main>
   </div>
@@ -56,6 +58,6 @@
   <script src="config.js"></script>
   <script src="auth.js"></script>
   <script src="admin-shared.js"></script>
-  <script src="admin-dashboard.js"></script>
+  <script src="admin-tickets.js"></script>
 </body>
 </html>
