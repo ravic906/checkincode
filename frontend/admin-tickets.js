@@ -9,6 +9,7 @@ initAdminSidebar("tickets");
 
 let allTickets = [];
 let currentStatus = "open";
+let expandedTicketId = null; // accordion -- only one ticket's full detail open at a time, same pattern as admin-users.js's toggleHistory
 
 // Shared by both a ticket's own attachment and a reply's -- fetches the
 // blob (with proper auth, see adminApiBlob) and opens it in a new tab
@@ -39,19 +40,19 @@ function renderReply(r, ticketId) {
   `;
 }
 
-function renderTicketCard(t) {
-  const when = t.created_at ? new Date(t.created_at).toLocaleString() : "—";
+// A short single-line preview for the collapsed row -- full message and
+// everything else (attachment, reply thread, reply form) only render once
+// expanded, so a long ticket doesn't dominate the list.
+function previewText(message, max = 90) {
+  const oneLine = message.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
+function renderTicketDetails(t) {
   const resolvedWhen = t.resolved_at ? new Date(t.resolved_at).toLocaleString() : null;
   const replies = t.replies || [];
   return `
-    <div class="ticket-card" data-ticket-id="${t.id}">
-      <div class="ticket-card-header">
-        <div>
-          <div class="ticket-subject">${escapeHtml(t.subject)}</div>
-          <div class="user-sublabel">${escapeHtml(t.email || t.user_id)} · ${when}</div>
-        </div>
-        <span class="pill ticket-status-${t.status}">${t.status === "resolved" ? "Resolved" : "Open"}</span>
-      </div>
+    <div class="ticket-details">
       <p class="ticket-message">${escapeHtml(t.message)}</p>
       ${t.has_attachment ? attachmentChip(t.attachment_filename, `/api/admin/tickets/${t.id}/attachment`) : ""}
       ${replies.length ? `<div class="ticket-replies">${replies.map((r) => renderReply(r, t.id)).join("")}</div>` : ""}
@@ -78,6 +79,30 @@ function renderTicketCard(t) {
   `;
 }
 
+function renderTicketCard(t) {
+  const when = t.created_at ? new Date(t.created_at).toLocaleString() : "—";
+  const isExpanded = t.id === expandedTicketId;
+  const replyCount = (t.replies || []).length;
+  return `
+    <div class="ticket-card${isExpanded ? " expanded" : ""}" data-ticket-id="${t.id}">
+      <button type="button" class="ticket-card-header" data-toggle-ticket>
+        <div class="ticket-card-header-main">
+          <div class="ticket-subject">${escapeHtml(t.subject)}</div>
+          <div class="user-sublabel">
+            ${escapeHtml(t.email || t.user_id)} · ${when}
+            ${!isExpanded ? ` · ${escapeHtml(previewText(t.message))}` : ""}
+            ${replyCount ? ` · ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : ""}
+            ${t.has_attachment ? " · 📎" : ""}
+          </div>
+        </div>
+        <span class="pill ticket-status-${t.status}">${t.status === "resolved" ? "Resolved" : "Open"}</span>
+        <span class="ticket-expand-chevron">${isExpanded ? "▲" : "▼"}</span>
+      </button>
+      ${isExpanded ? renderTicketDetails(t) : ""}
+    </div>
+  `;
+}
+
 function renderTickets(tickets) {
   const list = document.getElementById("ticketsList");
   list.innerHTML = tickets.length
@@ -85,14 +110,23 @@ function renderTickets(tickets) {
     : `<p class="empty-note">No tickets match.</p>`;
 
   list.querySelectorAll("[data-attachment-path]").forEach((btn) => {
-    btn.onclick = () => openAttachment(btn.dataset.attachmentPath);
+    btn.onclick = (e) => { e.stopPropagation(); openAttachment(btn.dataset.attachmentPath); };
   });
 
-  list.querySelectorAll(".ticket-card").forEach((card) => {
+  list.querySelectorAll("[data-toggle-ticket]").forEach((headerBtn) => {
+    headerBtn.onclick = () => {
+      const id = Number(headerBtn.closest(".ticket-card").dataset.ticketId);
+      expandedTicketId = expandedTicketId === id ? null : id;
+      applyTicketSearch();
+    };
+  });
+
+  list.querySelectorAll(".ticket-card.expanded").forEach((card) => {
     const id = Number(card.dataset.ticketId);
     const btn = card.querySelector("[data-action]");
     if (btn) {
-      btn.onclick = async () => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
         const newStatus = btn.dataset.action === "resolve" ? "resolved" : "open";
         btn.disabled = true;
         try {
@@ -110,6 +144,7 @@ function renderTickets(tickets) {
 
     const replyForm = card.querySelector("[data-reply-form]");
     if (replyForm) {
+      replyForm.onclick = (e) => e.stopPropagation();
       const fileNameEl = replyForm.querySelector(".file-picker-name");
       const filePickerInput = replyForm.querySelector(".file-picker-input");
       if (filePickerInput && fileNameEl) {
@@ -119,6 +154,7 @@ function renderTickets(tickets) {
       }
       replyForm.onsubmit = async (e) => {
         e.preventDefault();
+        e.stopPropagation();
         const textarea = replyForm.querySelector("textarea");
         const fileInput = replyForm.querySelector(".ticket-reply-file");
         const message = textarea.value.trim();
@@ -169,6 +205,7 @@ document.getElementById("ticketTabs").querySelectorAll("button").forEach((btn) =
     document.getElementById("ticketTabs").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     currentStatus = btn.dataset.status;
+    expandedTicketId = null;
     loadTickets();
   };
 });

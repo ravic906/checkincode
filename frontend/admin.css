@@ -308,11 +308,29 @@ table.admin-table tr.clickable:hover td { background: var(--panel-2); }
 
 .empty-note { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
 
-.ticket-card { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.ticket-card { border-bottom: 1px solid var(--border); }
 .ticket-card:last-child { border-bottom: none; }
-.ticket-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ticket-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.ticket-card-header:hover .ticket-subject { color: var(--accent); }
+.ticket-card-header-main { min-width: 0; flex: 1; }
+.ticket-card-header-main .user-sublabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-expand-chevron { font-size: 10px; color: var(--muted); flex-shrink: 0; }
 .ticket-subject { font-weight: 600; font-size: 14px; }
-.ticket-message { margin: 10px 0; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+.ticket-details { padding-bottom: 16px; }
+.ticket-message { margin: 0 0 10px; font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
 .ticket-card-actions { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .ticket-reply-link { font-size: 12px; color: var(--accent); text-decoration: none; }
 .ticket-reply-link:hover { text-decoration: underline; }
