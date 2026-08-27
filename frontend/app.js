@@ -1309,11 +1309,6 @@ async function init() {
     if (window.renderInterviewSetup) window.renderInterviewSetup();
   };
 
-  // The tier badge is independent of everything else on the page --
-  // fire it off in the background rather than awaiting it, so a slow
-  // /api/usage response never blocks anything the user might do first.
-  refreshTierBadge();
-
   // The problem list itself IS needed before the URL-restore logic below
   // can show the right track/problem, so this one still has to be
   // awaited -- but note allProblems defaults to [] and every handler
@@ -1325,12 +1320,18 @@ async function init() {
   populateTagFilter();
   renderProblemList();
 
-  // The very first api() calls above race Clerk's async script load --
-  // isSignedIn() is almost always still false at that instant even for a
-  // signed-in user, so that first render silently uses the anonymous
-  // identity instead. Once Clerk actually finishes loading (and on every
-  // subsequent sign-in/out), refresh so tier/locked/solved reflect who's
-  // really signed in.
+  // The tier badge's first fetch is deliberately deferred until Clerk's
+  // initial load settles, rather than fired eagerly here -- it used to
+  // fire immediately and get silently redone once Clerk resolved, back
+  // when the only cost of that first blind call was a briefly-wrong tier
+  // badge. Since /api/usage now also persists a `users` row for whoever
+  // it's called as, firing blind before Clerk loads created a real,
+  // permanent throwaway row for a signed-in user's OWN page load --
+  // confirmed live: a fresh, email-less user row appeared at the exact
+  // moment an already-registered admin simply reloaded the page. Waiting
+  // for Clerk first means that first real /api/usage call already carries
+  // the correct identity when one exists. Still fully non-blocking either
+  // way -- nothing here is awaited by the caller.
   if (typeof waitForClerk === "function") {
     waitForClerk()
       .then((Clerk) => {
@@ -1338,9 +1339,10 @@ async function init() {
         Clerk.addListener(() => refreshIdentityDependentState());
       })
       .catch(() => {
-        // Clerk failed to load -- practice mode still works anonymously,
-        // nothing further to do here.
+        refreshTierBadge(); // Clerk failed to load -- still functional anonymously
       });
+  } else {
+    refreshTierBadge();
   }
 
   // Restore whatever track/problem was in the URL (see syncUrl()) so a
