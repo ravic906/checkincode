@@ -461,11 +461,11 @@ def api_submit(req: SubmitRequest, x_user_id: str = Header(default=None), author
             result["output"] = graded["output"]
             if not graded["passed"]:
                 result["error"] = graded["error"]
-        problems_module.record_submission(user_id, problem["id"], result["correct"], req.query)
+        problems_module.record_submission(user_id, problem["id"], result["correct"], req.query, result.get("error"))
         return result
 
     result = _grade_sql_submission(problem, req.query)
-    problems_module.record_submission(user_id, problem["id"], result["correct"], req.query)
+    problems_module.record_submission(user_id, problem["id"], result["correct"], req.query, result.get("error"))
     return result
 
 
@@ -647,7 +647,7 @@ def api_case_submit(req: CaseSubmitRequest, x_user_id: str = Header(default=None
         # category charts and per-user history) with a pass threshold, so
         # this track shows up in the same admin/user views without a
         # parallel table just for its own history.
-        problems_module.record_submission(user_id, problem["id"], (result.get("score") or 0) >= 70, req.answer)
+        problems_module.record_submission(user_id, problem["id"], (result.get("score") or 0) >= 70, req.answer, result.get("overall_summary"))
 
     return result
 

@@ -2642,25 +2642,25 @@ def list_problems_summary(difficulty: str | None = None, tag: str | None = None,
     return rows
 
 
-def record_submission(user_id: str, problem_id: str, correct: bool, query_text: str | None = None):
+def record_submission(user_id: str, problem_id: str, correct: bool, query_text: str | None = None, result_text: str | None = None):
     with db.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO submissions (user_id, problem_id, correct, query_text) VALUES (%s,%s,%s,%s)",
-                (user_id, problem_id, correct, query_text),
+                "INSERT INTO submissions (user_id, problem_id, correct, query_text, result_text) VALUES (%s,%s,%s,%s,%s)",
+                (user_id, problem_id, correct, query_text, result_text),
             )
 
 
 def get_user_submissions_for_problem(user_id: str, problem_id: str, limit: int = 20) -> list[dict]:
     """A user's own past attempts at one specific problem, newest first --
-    lets them look back at what they wrote on a previous submission (and
-    whether it passed) while working the same problem again. Scoped to
+    lets them look back at what they wrote on a previous submission, why
+    it passed or failed, while working the same problem again. Scoped to
     (user_id, problem_id) both, never another user's submissions."""
     with db.get_conn() as conn:
         with db.dict_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT id, correct, query_text, submitted_at
+                SELECT id, correct, query_text, result_text, submitted_at
                 FROM submissions
                 WHERE user_id = %s AND problem_id = %s
                 ORDER BY submitted_at DESC

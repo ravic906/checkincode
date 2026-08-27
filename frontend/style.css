@@ -460,6 +460,16 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 }
 .pill.history-status-correct { background: rgba(56,193,114,0.15); color: var(--green); }
 .pill.history-status-incorrect { background: rgba(227,86,74,0.15); color: var(--red); }
+.history-result-text {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.history-result-text-incorrect { background: rgba(227,86,74,0.08); border-left: 2px solid var(--red); }
+.history-result-text-correct { background: rgba(56,193,114,0.08); border-left: 2px solid var(--green); }
 
 #editor {
   height: 220px;

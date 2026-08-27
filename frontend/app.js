@@ -280,6 +280,7 @@ async function openSubmissionHistoryModal(problemId, kind) {
           ${s.query_text ? `<button class="history-load-btn" data-idx="${i}" type="button">Load this</button>` : `<span class="history-no-text">Text not saved</span>`}
         </div>
         ${s.query_text ? `<pre class="history-entry-code">${escapeHtml(s.query_text)}</pre>` : ""}
+        ${s.result_text ? `<div class="history-result-text history-result-text-${s.correct ? "correct" : "incorrect"}">${escapeHtml(s.result_text)}</div>` : ""}
       </div>
     `;
   }).join("");

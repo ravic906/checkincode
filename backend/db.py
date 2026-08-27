@@ -225,6 +225,17 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS query_text TEXT
             """)
+            # Migration: the grading result itself (the SQL/Python error or
+            # diff shown at submit time, or the Case track's overall_summary)
+            # was discarded after the response was sent -- a user looking
+            # back at a failed attempt in submission history could see THAT
+            # it failed and the code they wrote, but not WHY. NULL on
+            # pre-existing rows and on any correct SQL/Python submission
+            # (nothing to explain there); Case submissions get a summary
+            # either way since that track always produces one.
+            cur.execute("""
+                ALTER TABLE submissions ADD COLUMN IF NOT EXISTS result_text TEXT
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
