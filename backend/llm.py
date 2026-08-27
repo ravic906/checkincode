@@ -597,9 +597,16 @@ def _interview_system_prompt(
             "This is the very first question of the interview. skip_intro "
             "was requested, meaning the opening monologue already handled "
             "greetings and introductions -- do NOT ask the candidate to "
-            "introduce themselves or describe their background again. Go "
-            "straight into a real, substantive question on one of the "
-            "topics below.\n\n"
+            "introduce themselves, describe their background, walk through "
+            "their experience, or name tools/technologies they've used. "
+            "Forbidden opener patterns, even rephrased: \"tell me about "
+            "your experience/background\", \"walk me through your "
+            "experience with X\", \"what tools have you worked with\". Go "
+            "straight into a concrete, substantive question ON ONE OF THE "
+            "TOPICS BELOW -- e.g. a specific SQL scenario, or a specific "
+            "conceptual/case question -- as if this were the second "
+            "question of an interview already in progress, not the "
+            "opener.\n\n"
         )
     elif current_topic == "intro":
         topic_budget_block = (
