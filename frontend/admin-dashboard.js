@@ -2,16 +2,15 @@ initAdminSidebar("dashboard");
 
 async function loadDashboard() {
   const grid = document.getElementById("statGrid");
-  const chart = document.getElementById("categoryChart");
+  const lastBatchNote = document.getElementById("lastBatchNote");
   const errorArea = document.getElementById("errorArea");
   grid.innerHTML = `<div class="loading-dots">Loading…</div>`;
   try {
-    const [userSummary, liveProblems, pending, cadence, solvedBreakdown] = await Promise.all([
+    const [userSummary, liveProblems, pending, cadence] = await Promise.all([
       adminApi("/api/admin/users/summary"),
       adminApi("/api/admin/problems/live"),
       adminApi("/api/admin/problems/pending"),
       adminApi("/api/admin/cadence"),
-      adminApi("/api/admin/stats/solved-by-category"),
     ]);
 
     grid.innerHTML = `
@@ -22,11 +21,9 @@ async function loadDashboard() {
       <div class="stat-card"><div class="num">${pending.problems.length}</div><div class="label">Pending Drafts</div></div>
     `;
 
-    chart.innerHTML = renderCategoryPie(solvedBreakdown, 140);
-
     if (cadence.last_batch_generated_at) {
       const when = new Date(cadence.last_batch_generated_at).toLocaleString();
-      chart.innerHTML += `<p style="color:var(--muted); font-size:12px; margin-top:14px;">Last batch generated: ${when}</p>`;
+      lastBatchNote.textContent = `Last problem batch generated: ${when}`;
     }
   } catch (err) {
     errorArea.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
