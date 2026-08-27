@@ -304,9 +304,14 @@ PERSONA_TONE = {
     "strict": (
         "Adopt a terse, no-frills tone typical of a tough technical panel "
         "round -- minimal encouragement, move on quickly from vague "
-        "answers, press harder on follow-ups. Still stay composed and "
-        "professional throughout -- terse and demanding, never rude, "
-        "impatient, or dismissive.\n\n"
+        "answers, press harder on follow-ups. Concretely: do NOT use "
+        "cushioning openers like \"no worries\", \"I appreciate your "
+        "response, but\", or \"that's a great approach\" -- state directly "
+        "what was missing or wrong, then ask the next question. Skip "
+        "small talk between questions. This tone must be clearly "
+        "distinguishable from the neutral default, not just a mild "
+        "variation of it. Still stay composed and professional throughout "
+        "-- terse and demanding, never rude, impatient, or dismissive.\n\n"
     ),
 }
 
@@ -471,11 +476,32 @@ def build_opening_monologue(*, target_role: str, profile: dict, persona: str, as
     preference) and, if requested, folded into a second analyze_candidate_
     profile call before the real first question is asked.
     """
+    # The settle-in line is the one sentence a candidate hears before any
+    # question is asked, so it's the cheapest place to make persona actually
+    # perceptible from turn 1 -- QA found this templated monologue silently
+    # ignored the persona argument entirely, giving every persona (including
+    # "strict") the same "take a breath, no pressure" framing.
+    PERSONA_SETTLE_IN = {
+        "friendly": (
+            "Take a breath, there's no pressure here -- this is just "
+            "practice, so treat any stumble as useful information, not a "
+            "verdict."
+        ),
+        "neutral": (
+            "This is a practice interview, so treat it as a chance to "
+            "rehearse out loud, not a pass/fail test."
+        ),
+        "strict": (
+            "This will run like a real technical panel round -- I'll move "
+            "quickly and press on gaps, so treat it as practice for the "
+            "real thing, not a casual chat."
+        ),
+    }
+    settle_in = PERSONA_SETTLE_IN.get(persona, PERSONA_SETTLE_IN["neutral"])
     monologue = (
         f"Hi, thanks for joining -- welcome to your practice interview for "
-        f"a {target_role} role. Take a breath, there's no pressure here -- "
-        "this is just practice, so treat any stumble as useful information, "
-        f"not a verdict. {profile.get('opening_note', '')} We'll go through "
+        f"a {target_role} role. {settle_in} "
+        f"{profile.get('opening_note', '')} We'll go through "
         "a few areas, and I'll follow up where it's useful."
     )
     if ask_history_pref:
