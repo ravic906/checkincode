@@ -585,6 +585,22 @@ def _interview_system_prompt(
             f"your topic MUST be exactly \"{forced_topic}\" -- write an "
             f"opening question for that new topic now.\n\n"
         )
+    elif current_topic is None:
+        # skip_intro's very first live-generated turn -- confirmed live to
+        # otherwise default to asking an introduce-yourself-style question
+        # anyway (ignoring skip_intro's whole point) while being forced to
+        # label it with a real topic name from the list below, since
+        # nothing here told it not to. The opening monologue already
+        # covered introductions when skip_intro was requested; there's no
+        # separate intro turn to skip into.
+        topic_budget_block = (
+            "This is the very first question of the interview. skip_intro "
+            "was requested, meaning the opening monologue already handled "
+            "greetings and introductions -- do NOT ask the candidate to "
+            "introduce themselves or describe their background again. Go "
+            "straight into a real, substantive question on one of the "
+            "topics below.\n\n"
+        )
     elif current_topic == "intro":
         topic_budget_block = (
             "You are on the opening \"introduce yourself\" question. This is a "
