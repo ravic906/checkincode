@@ -272,11 +272,20 @@ function openContactModal() {
       <label>Your email<input type="email" id="contactEmail" required value="${escapeHtml(prefillEmail)}" placeholder="you@example.com" /></label>
       <label>Subject<input type="text" id="contactSubject" required maxlength="200" placeholder="What's this about?" /></label>
       <label>Message<textarea id="contactMessage" required maxlength="5000" rows="6" placeholder="Tell us what's going on…"></textarea></label>
-      <label>Attachment (optional)<input type="file" id="contactAttachment" accept="image/*,.pdf" /></label>
+      <div class="contact-form-field-label">Attachment (optional)</div>
+      <div class="file-picker">
+        <input type="file" id="contactAttachment" class="file-picker-input" accept="image/*,.pdf" />
+        <label for="contactAttachment" class="file-picker-btn">📎 Choose file</label>
+        <span class="file-picker-name" id="contactAttachmentName">No file chosen</span>
+      </div>
       <div id="contactFormError"></div>
       <button type="submit" class="submit-btn" id="contactSubmitBtn">Send</button>
     </form>
   `;
+
+  document.getElementById("contactAttachment").addEventListener("change", (e) => {
+    document.getElementById("contactAttachmentName").textContent = e.target.files[0] ? e.target.files[0].name : "No file chosen";
+  });
 
   document.getElementById("contactForm").onsubmit = async (e) => {
     e.preventDefault();

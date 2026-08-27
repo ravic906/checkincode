@@ -65,7 +65,11 @@ function renderTicketCard(t) {
         <form class="ticket-reply-form" data-reply-form>
           <div class="ticket-reply-form-fields">
             <textarea placeholder="Write a reply…" required></textarea>
-            <input type="file" class="ticket-reply-file" title="Attach a file (optional)" />
+            <div class="file-picker">
+              <input type="file" class="ticket-reply-file file-picker-input" id="replyFile-${t.id}" />
+              <label for="replyFile-${t.id}" class="file-picker-btn">📎 Attach file</label>
+              <span class="file-picker-name">No file chosen</span>
+            </div>
           </div>
           <button type="submit" class="submit-btn">Send Reply</button>
         </form>
@@ -106,6 +110,13 @@ function renderTickets(tickets) {
 
     const replyForm = card.querySelector("[data-reply-form]");
     if (replyForm) {
+      const fileNameEl = replyForm.querySelector(".file-picker-name");
+      const filePickerInput = replyForm.querySelector(".file-picker-input");
+      if (filePickerInput && fileNameEl) {
+        filePickerInput.addEventListener("change", () => {
+          fileNameEl.textContent = filePickerInput.files[0] ? filePickerInput.files[0].name : "No file chosen";
+        });
+      }
       replyForm.onsubmit = async (e) => {
         e.preventDefault();
         const textarea = replyForm.querySelector("textarea");
