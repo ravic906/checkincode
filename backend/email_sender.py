@@ -4,11 +4,9 @@ SMTP setup. Same env-var-configured, provider-agnostic pattern as
 tts.py/stt.py so swapping providers later needs no code change at call
 sites, just different env vars.
 
-RESEND_FROM defaults to Resend's own shared test domain, which works
-immediately with no DNS setup but has lower deliverability/reputation
-than a verified sending domain -- switch to something like
-"PhoenixPrep <support@phoenixprep.in>" once phoenixprep.in (or a
-subdomain) is verified in the Resend dashboard.
+RESEND_FROM defaults to phoenixprep.in now that it's a verified sending
+domain in Resend -- override via the RESEND_FROM env var if that ever
+needs to change (e.g. a different subdomain), no code change needed.
 """
 
 import os
@@ -16,7 +14,7 @@ import os
 import requests
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-RESEND_FROM = os.environ.get("RESEND_FROM", "PhoenixPrep <onboarding@resend.dev>")
+RESEND_FROM = os.environ.get("RESEND_FROM", "PhoenixPrep <support@phoenixprep.in>")
 
 
 def send_email(*, to: str, subject: str, body_text: str) -> None:
