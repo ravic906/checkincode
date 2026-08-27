@@ -575,7 +575,25 @@ def _interview_system_prompt(
         )
 
     topic_budget_block = ""
-    if forced_topic:
+    if forced_topic and current_topic is None:
+        # skip_intro's opening topic, forced explicitly by the caller
+        # rather than left to the model's own judgment -- see main.py's
+        # api_interview_start. Distinct wording from the budget-exhausted
+        # case below: there's no real "budget used up" here, and the
+        # opening monologue (not a prior topic) is what came before this.
+        topic_budget_block = (
+            "This is the opening real question of the interview. "
+            "skip_intro was requested, meaning the opening monologue "
+            "already handled greetings and introductions -- do NOT ask "
+            "the candidate to introduce themselves, describe their "
+            "background, or name tools/experience. Your action MUST be "
+            f"\"switch_topic\" and your topic MUST be exactly "
+            f"\"{forced_topic}\" -- ask one concrete, substantive question "
+            "on that topic now, phrased as if this were already the "
+            "second question of an interview in progress, not an "
+            "opener.\n\n"
+        )
+    elif forced_topic:
         # Cap already reached -- this is not a judgment call, it's a direct
         # instruction. Leaving it as "decide whether to switch" repeatedly
         # let the model just keep following up past the limit.

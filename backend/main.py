@@ -873,12 +873,24 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         }
 
     if req.skip_intro:
+        # Forcing the opening topic explicitly, rather than leaving turn 1
+        # to the model's own judgment plus a "don't ask an icebreaker"
+        # instruction -- confirmed live that a prompt-only negative
+        # instruction here was unreliable (the model kept defaulting to a
+        # "tell me about your experience/background/tools" opener anyway,
+        # even when that exact pattern was named as forbidden). forced_topic
+        # is the same mechanism that already reliably forces a real switch
+        # once MAX_TURNS_PER_TOPIC is hit elsewhere in this file -- reusing
+        # a proven-reliable path instead of inventing a new instruction the
+        # model has to newly learn to obey.
+        opening_topic = (profile.get("recommended_topics") or topics_list)[0]
         try:
             result = llm.interview_turn(
                 user_id=user_id,
                 topics=topics_list,
                 resume_text=resume_text,
                 conversation=[],
+                forced_topic=opening_topic,
                 persona=session["persona"],
                 target_role=req.target_role,
                 candidate_profile=profile,
