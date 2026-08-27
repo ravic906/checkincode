@@ -171,8 +171,18 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
     already used its one hint on this topic and tries to offer another, the
     turn counter is maxed out the same way, forcing a switch rather than
     trusting the model to stop offering hints on its own.
+
+    action == "switch_topic" alone is NOT enough to reset the counter --
+    confirmed live, the model sometimes labels a turn switch_topic while
+    re-asking essentially the same underlying question (occasionally even
+    mislabeling which topic it's supposedly switching to). Trusting the
+    action label alone let it reset the budget every single turn and cycle
+    on one topic indefinitely, completely defeating MAX_TURNS_PER_TOPIC.
+    A switch only counts as real or if `topic` actually differs from the
+    topic already in progress.
     """
-    if action == "switch_topic" or session["current_topic"] is None:
+    is_real_switch = topic != session["current_topic"]
+    if session["current_topic"] is None or (action == "switch_topic" and is_real_switch):
         session["current_topic"] = topic
         session["current_topic_turns"] = 1
         session["hint_used_this_topic"] = False
