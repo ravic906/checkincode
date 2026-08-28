@@ -511,7 +511,7 @@ function renderChatBubble(t, idx) {
   const isRevealing = isAssistant && idx === speakingRevealIndex;
   const content = isRevealing ? t.content.slice(0, speakingRevealChars) : t.content;
   return `
-    <div class="chat-turn ${isAssistant ? "assistant" : "user"}">
+    <div class="chat-turn ${isAssistant ? "assistant" : "user"}" data-idx="${idx}">
       <div class="chat-avatar ${isAssistant ? "assistant" : "user"}">${isAssistant ? "◆" : "●"}</div>
       <div class="chat-bubble-col">
         <div class="chat-who">${isAssistant ? "Interviewer" : "You"}${t.topic && t.topic !== "intro" ? `<span class="chat-topic">${escapeHtml(t.topic)}</span>` : ""}</div>
@@ -519,6 +519,28 @@ function renderChatBubble(t, idx) {
       </div>
     </div>
   `;
+}
+
+// During a reveal, only the currently-revealing bubble's text actually
+// changes tick to tick -- but renderTranscript() used to replace the
+// WHOLE transcript's innerHTML on every ~120ms tick, tearing down and
+// recreating every bubble's DOM node, including ones that weren't
+// changing at all. Since .chat-turn has an entrance animation
+// (studio-rise-in), that meant every bubble on screen replayed its
+// fade/slide-in on every single tick for as long as any line was being
+// revealed -- the flicker/jitter this was built to fix. Now the ticking
+// interval only touches the one bubble's text node directly; a full
+// renderTranscript() still runs once when a new bubble is first added
+// and once when the reveal finishes, so entrance animations play
+// exactly once per bubble, same as any other message.
+function updateRevealingBubbleText() {
+  const el = document.getElementById("interviewTranscript");
+  if (!el || speakingRevealIndex === null || !interviewState) return;
+  const bubble = el.querySelector(`[data-idx="${speakingRevealIndex}"] .chat-bubble`);
+  const turn = interviewState.transcript[speakingRevealIndex];
+  if (!bubble || !turn) { renderTranscript(); return; } // shape changed unexpectedly -- fall back to a full rebuild
+  bubble.textContent = turn.content.slice(0, speakingRevealChars);
+  el.scrollTop = el.scrollHeight;
 }
 
 // Real per-word timestamps aren't available from the TTS API, so this
@@ -588,7 +610,7 @@ function startTextReveal(index, fullText, audioEl) {
       : fullText.length / ESTIMATED_CHARS_PER_SECOND;
     const progress = duration > 0 ? Math.min(0.98, audioEl.currentTime / duration) : 0;
     speakingRevealChars = Math.floor(fullText.length * progress);
-    renderTranscript();
+    updateRevealingBubbleText();
   }, 120);
 }
 
@@ -978,11 +1000,18 @@ function loadTopicTrackMap() {
 
 async function renderFeedback(report) {
   const screen = document.getElementById("interviewScreen");
-  const level = LEVEL_META[report.rough_level] || LEVEL_META.intermediate;
   const topicTrack = await loadTopicTrackMap();
 
   const scoreHtml = typeof report.score === "number"
     ? `<div class="feedback-score">${report.score}<span>/100</span></div>`
+    : "";
+  // Falling back to "Intermediate" when rough_level is genuinely null (an
+  // interview ended before anything was answered -- see interview_feedback's
+  // answered_topics override) would show a real-sounding skill-level badge
+  // for an assessment that explicitly has none. Only render the badge when
+  // there's a real level to show.
+  const levelHtml = report.rough_level && LEVEL_META[report.rough_level]
+    ? `<div class="feedback-level-badge"><span class="feedback-level-icon">${LEVEL_META[report.rough_level].icon}</span>${escapeHtml(LEVEL_META[report.rough_level].label)}</div>`
     : "";
 
   const pillsHtml = (report.topics_to_study || []).map(t => {
@@ -1047,9 +1076,7 @@ async function renderFeedback(report) {
         <h1>Your Feedback</h1>
         <div class="feedback-header-badges">
           ${scoreHtml}
-          <div class="feedback-level-badge">
-            <span class="feedback-level-icon">${level.icon}</span>${escapeHtml(level.label)}
-          </div>
+          ${levelHtml}
         </div>
       </div>
       <p class="feedback-summary">${escapeHtml(report.overall_summary || "")}</p>

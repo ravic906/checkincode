@@ -1599,6 +1599,27 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
         ]
         report.setdefault("next_practice_plan", [])
         report["trend_note"] = _validate_trend_note(report.get("trend_note"), report["topic_scores"], topic_history)
+        # The prompt-level instruction above (keep short transcripts brief
+        # and general) is a mitigation, not a guarantee -- confirmed live
+        # that the model still returned a confident score (65/100) with a
+        # full strengths/weaknesses list for an interview ended within
+        # seconds, before the candidate answered anything at all. Unlike
+        # topic_scores/question_notes, score/strengths/weaknesses/
+        # overall_summary have no per-item topic to filter against, so
+        # this is an all-or-nothing deterministic override: if literally
+        # nothing was ever answered, force the report to say exactly
+        # that instead of trusting the model not to fabricate a
+        # narrative around silence.
+        if not answered_topics:
+            report["score"] = None
+            report["strengths"] = []
+            report["weaknesses"] = []
+            report["overall_summary"] = (
+                "The interview ended before any question was answered, so "
+                "there's nothing yet to assess -- start a new session "
+                "whenever you're ready to give it a real go."
+            )
+            report["rough_level"] = None
     except (json.JSONDecodeError, KeyError):
         report = {
             "overall_summary": result["reply"],
