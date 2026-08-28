@@ -200,7 +200,7 @@ async function openInterviewHistoryModal() {
       <div class="history-entry">
         <div class="history-entry-header">
           <span class="pill history-status-${iv.feedback && iv.feedback.score >= 60 ? "correct" : "incorrect"}">${escapeHtml(score)}</span>
-          <span class="history-entry-time">${escapeHtml(iv.target_role)} · ${PERSONA_LABEL[iv.persona] || iv.persona} · ${minutes} min · ${when}</span>
+          <span class="history-entry-time">${escapeHtml(iv.target_role || "Data Analyst")} · ${PERSONA_LABEL[iv.persona] || iv.persona} · ${minutes} min · ${when}</span>
           <button class="history-load-btn" data-idx="${i}" type="button">View report</button>
         </div>
       </div>
