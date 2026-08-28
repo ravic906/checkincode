@@ -1340,13 +1340,30 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             and session.get("hint_used_this_topic")
             and not is_real_switch
         )
-        if (result.get("candidate_stuck") and not is_real_switch) or hint_cap_hit:
-            # Two triggers for the same immediate-re-run pattern: a real
-            # interviewer moves on after ONE clear "I don't know" (don't
-            # rephrase and ask again), and doesn't offer a second hint on
-            # the same topic either. Re-run right away with a forced
-            # switch rather than deferring to next turn, so the candidate
-            # never sees a same-topic rephrase after either signal.
+        # Third trigger for the same immediate-re-run pattern: the
+        # interviewer's OWN free choice of topic (a genuine switch, not
+        # a stuck/hint-cap relabel) is exactly the path enforce_topic_ratio
+        # can't safely correct after the fact -- the question text is
+        # already written FOR that topic, so swapping just the label would
+        # leave them disagreeing (the topic-drift bug fixed earlier this
+        # session). Checking it here, before trusting this pass's result,
+        # means a ratio-violating discretionary switch gets the same
+        # forced-regeneration treatment as candidate_stuck/hint_cap_hit --
+        # confirmed via live testing this is the MAJORITY of real switches,
+        # not the edge case; without this the ratio target is only nominal.
+        ratio_topic = None
+        if is_real_switch and result["action"] == "switch_topic":
+            ratio_topic = role_topics.enforce_topic_ratio(
+                conversation=session["conversation"],
+                role=target_role_for_ratio,
+                chosen_topic=result["topic"],
+            )
+        ratio_violated = ratio_topic is not None and ratio_topic != result["topic"]
+        if (result.get("candidate_stuck") and not is_real_switch) or hint_cap_hit or ratio_violated:
+            # Re-run right away with a forced switch rather than deferring
+            # to next turn, so the candidate never sees a same-topic
+            # rephrase (stuck/hint-cap cases) or a ratio-violating topic
+            # that already has a full question written for it (this case).
             result = llm.interview_turn(
                 user_id=user_id,
                 topics=topics_list,
@@ -1354,7 +1371,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
                 conversation=session["conversation"],
                 current_topic=session["current_topic"],
                 topic_turn_count=session["current_topic_turns"],
-                forced_topic=role_topics.enforce_topic_ratio(
+                forced_topic=ratio_topic or role_topics.enforce_topic_ratio(
                     conversation=session["conversation"],
                     role=target_role_for_ratio,
                     chosen_topic=interview.next_topic(session, topics_list),
