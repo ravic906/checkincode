@@ -607,19 +607,42 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   font-size: 12px;
 }
 
-.diff-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.diff-preview .col h5 { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 0; }
-
-.failed-case-data { margin-bottom: 20px; }
-
-/* Wraps the input-data section and the output-diff section together under
-   one heading, with a numbered "1. / 2." narrative on each sub-heading --
-   two previously silent, identically-styled table blocks read as an
-   unexplained duplicate; this frames them as one story, in order. */
-.failure-detail { margin-bottom: 14px; }
-.failure-detail-title { font-size: 13px; font-weight: 600; color: var(--text); margin: 0 0 12px 0; }
-.failure-detail h4 { font-size: 12px; font-weight: 600; color: var(--text); margin: 0 0 8px 0; }
-.diff-preview-wrap { margin-bottom: 14px; }
+/* Input / Your Output / Expected Output -- always the SAME single failing
+   case, shown as switchable tabs (one panel visible at a time) rather than
+   three blocks stacked on top of each other. A filled segmented-control
+   look (not a thin underline) so the active tab reads at a glance, not
+   just on close inspection. */
+.io-tabs { margin-bottom: 14px; }
+.io-tabs .tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 16px;
+  padding: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.io-tab-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  font-family: inherit;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.io-tab-btn:hover { color: var(--text); }
+.io-tab-btn.active {
+  color: #ffffff;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+.io-tab-panel { display: none; }
+.io-tab-panel.active { display: block; animation: io-panel-in 0.12s ease; }
+@keyframes io-panel-in { from { opacity: 0; } to { opacity: 1; } }
 
 .loading-dots { color: var(--muted); font-size: 13px; }
 .ask-phoenix-hint { color: var(--muted); font-size: 13px; }

@@ -1174,58 +1174,41 @@ function renderResult(result, isPartialCheck = false) {
     html += `<div class="result-banner fail">❌ ${escapeHtml(result.error || "Not quite right.")}</div>`;
 
     if (result.failed_case_number && result.total_cases) {
-      // Naming the exact failing case (and how many ran) turns "it's wrong
-      // somewhere" into something a candidate can actually reason about --
-      // e.g. passing 3 sample-shaped cases but failing case 4 is a real
-      // signal (probably an edge case like NULLs or ties), not just noise.
-      const label = result.is_hidden_case
-        ? `hidden case ${result.failed_case_number}`
-        : "the sample data";
-      html += `<p class="test-case-progress">Failed on test case ${result.failed_case_number} of ${result.total_cases} (${label}) — the ones before it passed.</p>`;
+      // States plainly that this is the FIRST failing case and nothing
+      // past it was even run -- directly answers "am I only seeing one
+      // failure here, or several?".
+      html += `<p class="test-case-progress">This is the first case your query failed (case ${result.failed_case_number} of ${result.total_cases} checked) — grading stops here.</p>`;
     }
 
     if (result.is_hidden_case) {
       html += `<p class="hidden-case-note">This check ran your query against one of our hidden verification datasets — different data than the "Sample Data" shown above, used to make sure your query works in general rather than just for that one example.</p>`;
     }
 
-    // Two genuinely different things were being shown with near-identical
-    // table styling and no explanation of how they relate -- read as "two
-    // random sets of tables" rather than one coherent story. Now always
-    // ordered input-then-output ("here's the data, here's where your query
-    // went wrong against it"), under one shared heading, with a plain-
-    // language sentence bridging the two instead of two silent sections.
-    const hasInput = !!result.failed_case_tables;
-    const hasOutput = result.expected_preview || result.actual_preview;
-    if (hasInput || hasOutput) {
-      html += `<div class="failure-detail">`;
-      html += `<h3 class="failure-detail-title">This one test case, step by step</h3>`;
-
-      if (hasInput) {
-        // Deliberately no "(N tables: ...)" count here -- user feedback:
-        // a heading listing "2 tables" read as "2 separate test-case
-        // datasets" rather than 2 tables belonging to the SAME one. One
-        // singular-worded heading, then each table is just labeled with
-        // its own name via renderTable, same as the "Sample Data" panel.
-        const failTablesHtml = Object.entries(result.failed_case_tables)
-          .map(([name, table]) => renderTable(name, table))
-          .join("");
-        html += `<div class="failed-case-data">
-          <h4>1. The data your query ran against</h4>
-          ${failTablesHtml}
-        </div>`;
-      }
-
-      if (hasOutput) {
-        html += `<div class="diff-preview-wrap">
-          <h4>2. Running your query against that data, here's the mismatch</h4>
-          <div class="diff-preview">
-            <div class="col"><h5>What was expected</h5>${result.expected_preview ? renderPreviewTable(result.expected_preview) : "—"}</div>
-            <div class="col"><h5>What your query returned instead</h5>${result.actual_preview ? renderPreviewTable(result.actual_preview) : "—"}</div>
-          </div>
-        </div>`;
-      }
-
-      html += `</div>`;
+    // Exactly three labeled things, always about the SAME single failing
+    // case (grading fails fast at the first mismatch -- never a second or
+    // third dataset): Input, Your Output, Expected Output. Shown as tabs
+    // (one panel visible at a time) rather than stacked on top of each
+    // other, so switching between them is a click, not a scroll.
+    const ioPanels = [];
+    if (result.failed_case_tables) {
+      const inputTablesHtml = Object.entries(result.failed_case_tables)
+        .map(([name, table]) => renderTable(name, table))
+        .join("");
+      ioPanels.push({ key: "input", label: "Input", html: inputTablesHtml });
+    }
+    if (result.actual_preview) {
+      ioPanels.push({ key: "actual", label: "Your Output", html: renderPreviewTable(result.actual_preview) });
+    }
+    if (result.expected_preview) {
+      ioPanels.push({ key: "expected", label: "Expected Output", html: renderPreviewTable(result.expected_preview) });
+    }
+    if (ioPanels.length) {
+      html += `<div class="io-tabs">
+        <div class="tabs">
+          ${ioPanels.map((p, i) => `<button type="button" class="io-tab-btn${i === 0 ? " active" : ""}" data-io-tab="${p.key}">${p.label}</button>`).join("")}
+        </div>
+        ${ioPanels.map((p, i) => `<div class="io-tab-panel${i === 0 ? " active" : ""}" data-io-panel="${p.key}">${p.html}</div>`).join("")}
+      </div>`;
     }
 
     html += `<p class="ask-phoenix-hint">Stuck? Tap <strong>Ask Phoenix</strong> for help with this problem.</p>`;
@@ -1251,6 +1234,16 @@ function renderPythonResult(result) {
 
   resultsSection.innerHTML = html;
   wirePlanButtons("inlineUpgrade");
+
+  resultsSection.querySelectorAll("[data-io-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      const key = btn.dataset.ioTab;
+      resultsSection.querySelectorAll("[data-io-tab]").forEach((b) => b.classList.toggle("active", b === btn));
+      resultsSection.querySelectorAll("[data-io-panel]").forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.ioPanel === key);
+      });
+    };
+  });
 }
 
 // -------- Ask Phoenix: open-ended contextual help, any time a problem is loaded --------
