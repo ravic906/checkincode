@@ -929,7 +929,6 @@ INTRO_QUESTION = (
 )
 
 
-FREE_TRIAL_DURATION_SECONDS = 10 * 60
 MAX_INTERVIEWS_PER_MONTH = 5  # Pro-tier cap -- interviews now also cost real STT + LLM-turn spend, not just the occasional Ask Phoenix call
 
 
