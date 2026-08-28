@@ -143,33 +143,32 @@ body {
   cursor: pointer;
 }
 
-.reset-progress-btn {
-  font-size: 11px;
-  color: var(--muted);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 5px 10px;
-  cursor: pointer;
-}
-.reset-progress-btn:hover { border-color: var(--red); color: var(--red); }
-
-.contact-support-btn {
+/* One shared look for every topbar action button (My Progress, Help,
+   Reset Progress) -- previously each had its own treatment (a solid
+   fill, an accent-tinted pill, and a bare text button with no icon at
+   all), which read as three unrelated widgets bolted together rather
+   than one coherent action group. Now: same neutral pill, same icon
+   size, same hover state for all three -- Reset Progress additionally
+   gets a "danger" hover (red) since it's the one destructive action
+   among them. */
+.topbar-icon-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--accent);
-  background: rgba(79,140,255,0.1);
-  border: 1px solid rgba(79,140,255,0.3);
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 7px 14px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
 }
-.contact-support-btn:hover { background: rgba(79,140,255,0.18); border-color: var(--accent); }
-.contact-support-icon { width: 15px; height: 15px; flex-shrink: 0; }
+.topbar-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.topbar-icon-btn-icon { width: 15px; height: 15px; flex-shrink: 0; }
+.topbar-icon-btn-danger:hover { border-color: var(--red); color: var(--red); }
 
 .contact-form { display: flex; flex-direction: column; gap: 14px; }
 .contact-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -950,6 +949,11 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
   .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .topbar-right { flex-wrap: wrap; gap: 8px; width: 100%; justify-content: flex-end; }
+  /* Icon-only on mobile (label still reachable via the button's title
+     tooltip / long-press) -- three full text labels plus the avatar
+     didn't fit one row at phone widths. */
+  .topbar-icon-btn span { display: none; }
+  .topbar-icon-btn { padding: 8px; }
 
   .problem-header, .tables-section, .editor-section, .results-section {
     padding-left: 16px;
@@ -1702,22 +1706,6 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
 /* ---------- Candidate progress dashboard ---------- */
 
-.dashboard-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 7px 14px;
-  cursor: pointer;
-}
-.dashboard-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
-.dashboard-nav-icon { width: 15px; height: 15px; flex-shrink: 0; }
-
 .dashboard-screen {
   flex: 1;
   overflow-y: auto;
@@ -1772,6 +1760,13 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 }
 .suggestion-cta:hover { filter: brightness(1.1); }
 .suggestion-card.suggestion-done p { margin: 0; font-size: 13px; color: var(--muted); }
+.suggestion-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.suggestion-cta-secondary {
+  background: none;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.suggestion-cta-secondary:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 
 .dashboard-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .dashboard-col h3 { margin: 0 0 2px; font-size: 15px; }
@@ -1779,34 +1774,38 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 
 .topic-row {
   display: flex;
-  align-items: stretch;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.topic-row-main {
-  flex: 1;
-  display: flex;
   align-items: center;
   gap: 10px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  color: var(--text);
-  min-width: 0;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
 }
-.topic-row-main:hover { border-color: var(--accent); }
-.topic-row-name { font-size: 13.5px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic-row-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.topic-row-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-row-stat { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.topic-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.topic-row-action {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.topic-row-action:hover { border-color: var(--accent); color: var(--accent); }
 .topic-row-dismiss {
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--muted);
-  width: 34px;
+  width: 30px;
   cursor: pointer;
   font-size: 13px;
 }
@@ -1824,6 +1823,5 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
 @media (max-width: 640px) {
   .dashboard-screen { padding: 24px 16px 60px; }
   .dashboard-columns { grid-template-columns: 1fr; }
-  .dashboard-nav-btn span { display: none; }
-  .topic-row-main { flex-wrap: wrap; }
+  .topic-row-actions { width: 100%; justify-content: flex-end; }
 }

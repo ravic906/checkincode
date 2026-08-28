@@ -247,10 +247,14 @@ async function loadDashboard() {
         <div class="suggestion-label">${s.basis === "weakness" ? "Suggested: shore up a weak spot" : "Suggested: next topic"}</div>
         <div class="suggestion-topic">${escapeHtml(s.topic)} <span class="pill tag-pill">${TRACK_LABEL[s.track] || s.track}</span></div>
         <p class="suggestion-reason">${escapeHtml(s.reason)}</p>
-        <button class="suggestion-cta" id="suggestionCtaBtn">Practice this topic</button>
+        <div class="suggestion-actions">
+          <button class="suggestion-cta" id="suggestionCtaBtn">Practice this topic</button>
+          <button class="suggestion-cta suggestion-cta-secondary" id="suggestionAskBtn">Ask Phoenix to explain it</button>
+        </div>
       </div>
     `;
     document.getElementById("suggestionCtaBtn").onclick = () => filterProblemsByTopic(s.topic, s.track);
+    document.getElementById("suggestionAskBtn").onclick = () => openAskPhoenixForTopic(s.track, s.topic);
   } else {
     suggestionEl.innerHTML = `<div class="suggestion-card suggestion-done"><p>You've attempted every topic in the bank — nice work. Keep sharpening with fresh attempts on anything below.</p></div>`;
   }
@@ -263,12 +267,16 @@ async function loadDashboard() {
     container.innerHTML = rows
       .map((r) => `
         <div class="topic-row" data-track="${escapeHtml(r.track)}" data-topic="${escapeHtml(r.topic)}">
-          <button type="button" class="topic-row-main" data-practice>
+          <div class="topic-row-info">
             <span class="topic-row-name">${escapeHtml(r.topic)}</span>
             <span class="pill tag-pill">${TRACK_LABEL[r.track] || r.track}</span>
             <span class="topic-row-stat">${r.solved}/${r.attempted} solved (${Math.round(r.solve_rate * 100)}%)</span>
-          </button>
-          <button type="button" class="topic-row-dismiss" data-dismiss title="Remove from this list">✕</button>
+          </div>
+          <div class="topic-row-actions">
+            <button type="button" class="topic-row-action" data-practice>Practice</button>
+            <button type="button" class="topic-row-action" data-ask>Ask Phoenix</button>
+            <button type="button" class="topic-row-dismiss" data-dismiss title="Remove from this list">✕</button>
+          </div>
         </div>
       `)
       .join("");
@@ -276,6 +284,10 @@ async function loadDashboard() {
     container.querySelectorAll("[data-practice]").forEach((btn) => {
       const row = btn.closest(".topic-row");
       btn.onclick = () => filterProblemsByTopic(row.dataset.topic, row.dataset.track);
+    });
+    container.querySelectorAll("[data-ask]").forEach((btn) => {
+      const row = btn.closest(".topic-row");
+      btn.onclick = () => openAskPhoenixForTopic(row.dataset.track, row.dataset.topic);
     });
     container.querySelectorAll("[data-dismiss]").forEach((btn) => {
       const row = btn.closest(".topic-row");
@@ -1361,13 +1373,29 @@ function renderPythonResult(result) {
 
 // -------- Ask Phoenix: open-ended contextual help, any time a problem is loaded --------
 
-let askPhoenixConversation = []; // [{role: "user"|"assistant", content}], reset whenever the loaded problem changes
+let askPhoenixConversation = []; // [{role: "user"|"assistant", content}], reset whenever the loaded problem (or topic) changes
+let askPhoenixTopicContext = null; // {track, topic} when opened from the dashboard instead of a loaded problem; null = normal per-problem mode
 
 function openAskPhoenix() {
+  askPhoenixTopicContext = null;
   document.getElementById("askPhoenixOverlay").style.display = "flex";
   document.getElementById("askPhoenixSubtitle").textContent = currentProblem ? currentProblem.title : "";
   renderAskPhoenixBody();
 }
+
+// Opened from the progress dashboard (a Strengths/Weaknesses row, or the
+// suggested-next-topic card) -- no problem is loaded, so this talks about
+// the CONCEPT generally via /api/ask-phoenix/topic instead of the usual
+// per-problem endpoint. Always starts a fresh conversation: a candidate
+// jumping between topics shouldn't see a prior topic's chat leak in.
+function openAskPhoenixForTopic(track, topic) {
+  askPhoenixTopicContext = { track, topic };
+  askPhoenixConversation = [];
+  document.getElementById("askPhoenixOverlay").style.display = "flex";
+  document.getElementById("askPhoenixSubtitle").textContent = topic;
+  renderAskPhoenixBody();
+}
+window.openAskPhoenixForTopic = openAskPhoenixForTopic;
 
 function closeAskPhoenix() {
   const overlay = document.getElementById("askPhoenixOverlay");
@@ -1390,7 +1418,7 @@ function renderAskPhoenixBody() {
   body.innerHTML = `
     <div class="ask-phoenix-thread" id="askPhoenixThread"></div>
     <div class="ask-phoenix-input-row">
-      <input type="text" id="askPhoenixInput" placeholder="Ask about this problem…" />
+      <input type="text" id="askPhoenixInput" placeholder="${askPhoenixTopicContext ? "Ask about this topic…" : "Ask about this problem…"}" />
       <button id="askPhoenixSendBtn">Ask</button>
     </div>
   `;
@@ -1406,7 +1434,9 @@ function renderAskPhoenixThread() {
   const thread = document.getElementById("askPhoenixThread");
   if (!thread) return;
   if (askPhoenixConversation.length === 0) {
-    thread.innerHTML = `<p class="ask-phoenix-empty">Ask anything about this problem -- how to approach it, what a concept means, or why your in-progress query might be off.</p>`;
+    thread.innerHTML = askPhoenixTopicContext
+      ? `<p class="ask-phoenix-empty">Ask anything about ${escapeHtml(askPhoenixTopicContext.topic)} -- what it means, when to use it, or for a worked example.</p>`
+      : `<p class="ask-phoenix-empty">Ask anything about this problem -- how to approach it, what a concept means, or why your in-progress query might be off.</p>`;
     return;
   }
   thread.innerHTML = askPhoenixConversation.map(t => `
@@ -1432,15 +1462,25 @@ async function sendAskPhoenixMessage() {
   input.value = "";
 
   try {
-    const res = await api("/api/ask-phoenix", {
-      method: "POST",
-      body: JSON.stringify({
-        problem_id: currentProblem.id,
-        current_query: monacoEditor ? monacoEditor.getValue() : null,
-        conversation: askPhoenixConversation.slice(0, -1),
-        question,
-      }),
-    });
+    const res = askPhoenixTopicContext
+      ? await api("/api/ask-phoenix/topic", {
+          method: "POST",
+          body: JSON.stringify({
+            track: askPhoenixTopicContext.track,
+            topic: askPhoenixTopicContext.topic,
+            conversation: askPhoenixConversation.slice(0, -1),
+            question,
+          }),
+        })
+      : await api("/api/ask-phoenix", {
+          method: "POST",
+          body: JSON.stringify({
+            problem_id: currentProblem.id,
+            current_query: monacoEditor ? monacoEditor.getValue() : null,
+            conversation: askPhoenixConversation.slice(0, -1),
+            question,
+          }),
+        });
     askPhoenixConversation.push({ role: "assistant", content: res.answer });
     renderAskPhoenixThread();
   } catch (e) {

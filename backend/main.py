@@ -135,6 +135,13 @@ class AskPhoenixRequest(BaseModel):
     question: str
 
 
+class AskPhoenixTopicRequest(BaseModel):
+    track: str
+    topic: str
+    conversation: list[dict] = []
+    question: str
+
+
 class InterviewStartRequest(BaseModel):
     target_role: str  # one of role_topics.ROLES
     resume_text: str | None = None  # optional override for this interview; also (re-)saves to the account, same as parse-resume
@@ -805,6 +812,38 @@ def api_ask_phoenix(req: AskPhoenixRequest, x_user_id: str = Header(default=None
             user_id=user_id,
             problem=problem,
             current_query=req.current_query,
+            conversation=req.conversation,
+            question=req.question,
+        )
+        return {"answer": llm_result["answer"], "llm_usage": llm_result["usage"]}
+    except Exception as e:
+        raise HTTPException(502, f"Ask Phoenix unavailable right now ({e}).")
+
+
+@app.post("/api/ask-phoenix/topic")
+def api_ask_phoenix_topic(req: AskPhoenixTopicRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    Ask Phoenix for a TOPIC concept, not a specific problem -- reached
+    from the progress dashboard (a Strengths/Weaknesses row, or the
+    suggested-next-topic card), where there's no problem_id/current_query
+    to anchor on. Same Pro gate and unlimited-use shape as the per-problem
+    /api/ask-phoenix; see llm.explain_topic for why the system prompt
+    differs (nothing to protect, so it teaches the concept directly).
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    u = users_module.get_usage(user_id)
+
+    if u["tier"] != "paid":
+        raise HTTPException(
+            402,
+            "Ask Phoenix is a Pro feature (₹199/mo) -- upgrade to get contextual AI help on any topic.",
+        )
+
+    try:
+        llm_result = llm.explain_topic(
+            user_id=user_id,
+            track=req.track,
+            topic=req.topic,
             conversation=req.conversation,
             question=req.question,
         )

@@ -265,6 +265,42 @@ def _call_chat_with_retry(*, max_retries: int = 2, retry_delay_seconds: float = 
     raise last_error
 
 
+def _explain_topic_system_prompt(track: str, topic: str) -> str:
+    subject = {"python": "Python", "case": "business-case interviewing"}.get(track, "SQL")
+    return (
+        f"You are Phoenix, a patient {subject} tutor. A candidate preparing for job "
+        f"interviews wants to understand the CONCEPT of \"{topic}\" -- they reached "
+        "you from their progress dashboard, not from a specific practice problem, "
+        "usually because it's come up as a strength to reinforce or a weak spot to "
+        "shore up. There is no single problem or solution being protected here, so "
+        "unlike problem-specific help, teach freely: explain the concept clearly, "
+        "walk through general example patterns, and answer follow-ups directly and "
+        "completely, the way a real tutor would in a review session.\n\n"
+        "Keep answers conversational -- a few short paragraphs or a short example "
+        f"snippet where it genuinely helps, not a structured reference document. "
+        f"Stay focused on {subject} and interview-relevant material; if asked "
+        "something unrelated, politely decline in one sentence and redirect back "
+        f"to \"{topic}\" or {subject} more broadly."
+    )
+
+
+def explain_topic(*, user_id: str, track: str, topic: str, conversation: list[dict], question: str) -> dict:
+    """
+    Open-ended concept explanation for a TOPIC, not a specific problem --
+    reached from the progress dashboard's Strengths/Weaknesses/suggested-
+    next-topic rows. Distinct from ask_phoenix's guide/comply mode split
+    (which exists to protect one specific problem's answer): there's
+    nothing to protect here, so this teaches the concept directly and
+    completely from the first message.
+    """
+    messages = [{"role": "system", "content": _explain_topic_system_prompt(track, topic)}]
+    messages.extend(conversation)
+    messages.append({"role": "user", "content": question})
+
+    result = _call_chat_complete(user_id=user_id, problem_id=f"topic:{track}:{topic}", messages=messages, max_tokens=900)
+    return {"answer": result["reply"], "usage": result["usage"]}
+
+
 def ask_phoenix(
     *,
     user_id: str,
