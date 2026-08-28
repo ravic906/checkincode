@@ -126,6 +126,31 @@ def get_session(session_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def list_history(user_id: str, limit: int = 50) -> list[dict]:
+    """A candidate's own past interviews, newest first -- ended ones only
+    (an in-progress session shows up via the resume-prompt flow instead,
+    not here). Scoped to the caller's own resolved identity, same
+    self-service-only pattern as get_user_submissions_for_problem in
+    problems.py. Returns full rows including `conversation` and
+    `feedback` -- the frontend needs both to show the full transcript +
+    report for a past interview, not just a summary line."""
+    with db.get_conn() as conn:
+        with db.dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT session_id, target_role, persona, started_at, duration_seconds,
+                       conversation, feedback
+                FROM interview_sessions
+                WHERE user_id = %s AND ended = TRUE
+                ORDER BY started_at DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 def elapsed_seconds(session: dict) -> float:
     return time.time() - session["started_at"]
 

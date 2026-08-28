@@ -1059,6 +1059,9 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   animation: studio-fade-in 0.4s ease both;
 }
 .interview-setup h1 { margin: 0 0 10px 0; font-size: 28px; letter-spacing: -0.01em; text-wrap: balance; }
+.interview-setup-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.interview-setup-heading-row h1 { flex: 1; min-width: 0; }
+.interview-setup-heading-row .history-btn { flex-shrink: 0; }
 
 .setup-card {
   margin-top: 28px;

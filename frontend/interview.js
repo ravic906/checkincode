@@ -166,6 +166,58 @@ const ROLE_CARDS = [
   { value: "Power Automate Developer", icon: "⚡", desc: "Flows, approvals, Teams/SharePoint/Forms integrations, Dataverse." },
 ];
 
+const PERSONA_LABEL = { friendly: "Friendly", neutral: "Neutral", strict: "Strict" };
+
+// Browsable history of a candidate's own past interviews -- the
+// interview-level equivalent of openSubmissionHistoryModal for practice
+// problems, reusing the same shared modal shell (#historyOverlay).
+async function openInterviewHistoryModal() {
+  const overlay = document.getElementById("historyOverlay");
+  const body = document.getElementById("historyBody");
+  document.getElementById("historyTitle").textContent = "Your Past Interviews";
+  overlay.style.display = "flex";
+  body.innerHTML = `<div class="loading-dots">Loading your past interviews…</div>`;
+
+  let interviews;
+  try {
+    const res = await api("/api/interview/history");
+    interviews = res.interviews;
+  } catch (e) {
+    body.innerHTML = `<div class="error-banner">Couldn't load interview history: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  if (!interviews.length) {
+    body.innerHTML = `<div class="empty-state">No completed interviews yet -- finish one to see it here.</div>`;
+    return;
+  }
+
+  body.innerHTML = interviews.map((iv, i) => {
+    const when = new Date(iv.started_at * 1000).toLocaleString();
+    const score = iv.feedback && typeof iv.feedback.score === "number" ? `${iv.feedback.score}/100` : "Not scored";
+    const minutes = Math.round((iv.duration_seconds || 0) / 60);
+    return `
+      <div class="history-entry">
+        <div class="history-entry-header">
+          <span class="pill history-status-${iv.feedback && iv.feedback.score >= 60 ? "correct" : "incorrect"}">${escapeHtml(score)}</span>
+          <span class="history-entry-time">${escapeHtml(iv.target_role)} · ${PERSONA_LABEL[iv.persona] || iv.persona} · ${minutes} min · ${when}</span>
+          <button class="history-load-btn" data-idx="${i}" type="button">View report</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  body.querySelectorAll(".history-load-btn").forEach((btn) => {
+    btn.onclick = () => {
+      const iv = interviews[Number(btn.dataset.idx)];
+      closeHistoryModal();
+      showInterviewScreen();
+      renderFeedback(iv.feedback || {});
+    };
+  });
+}
+window.openInterviewHistoryModal = openInterviewHistoryModal;
+
 async function renderInterviewSetupScreen() {
   // Free-tier users get one 10-minute trial interview before the 402 wall
   // -- fetch usage fresh so the setup screen can adapt its copy/duration
@@ -207,7 +259,10 @@ async function renderInterviewSetupScreen() {
   screen.innerHTML = `
     <div class="interview-setup">
       <div class="interview-eyebrow">${isUnrestricted ? "Admin · Unrestricted" : isTrialEligible ? "Free Trial · 10 min" : "Pro · Voice Interview"}</div>
-      <h1>Mock Interview</h1>
+      <div class="interview-setup-heading-row">
+        <h1>Mock Interview</h1>
+        <button type="button" class="history-btn" id="interviewHistoryBtn">History</button>
+      </div>
       <p class="home-sub">${isTrialEligible
         ? "Try one free 10-minute mock interview. Upgrade to Pro for the full 20-45 minute experience."
         : "20-45 minutes, spoken. Tailored to your target role and background -- the interviewer follows up on gaps, probes deeper on strong answers, and moves on when a topic's covered."}</p>
@@ -288,6 +343,8 @@ async function renderInterviewSetupScreen() {
   // null and the backend falls back to the already-saved account resume
   // (see api_interview_start), so there's nothing to pass explicitly.
   let resumeText = null;
+
+  document.getElementById("interviewHistoryBtn").onclick = openInterviewHistoryModal;
 
   document.querySelectorAll('.role-card').forEach(card => {
     card.addEventListener("click", () => {

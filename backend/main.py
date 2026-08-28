@@ -1414,6 +1414,16 @@ def api_interview_resume(session_id: str, x_user_id: str = Header(default=None),
     }
 
 
+@app.get("/api/interview/history")
+def api_interview_history(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """A candidate's own past interviews (ended ones), newest first --
+    the browsable equivalent of the SQL/Python track's per-problem
+    submission history, but at the interview level. Self-service only,
+    scoped to the caller's own resolved identity."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    return {"interviews": interview.list_history(user_id)}
+
+
 @app.post("/api/interview/end")
 def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
     user_id = auth.resolve_user_id(authorization, x_user_id)

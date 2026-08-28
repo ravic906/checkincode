@@ -445,6 +445,7 @@ function openContactModal() {
 async function openSubmissionHistoryModal(problemId, kind) {
   const overlay = document.getElementById("historyOverlay");
   const body = document.getElementById("historyBody");
+  document.getElementById("historyTitle").textContent = "Your Previous Submissions";
   overlay.style.display = "flex";
   body.innerHTML = `<div class="loading-dots">Loading your past attempts…</div>`;
 
