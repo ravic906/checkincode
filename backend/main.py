@@ -1250,10 +1250,19 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
                 session["candidate_profile"] = profile
 
         if session["skip_intro"]:
+            # Same forced_topic fix as api_interview_start's skip_intro
+            # branch, and for the same reason -- this branch's comment
+            # claimed to mirror that one "exactly", but QA found it was
+            # never actually given the fix: a returning candidate (the
+            # only ones who ever reach this awaiting_history_pref branch)
+            # requesting skip_intro on their 2nd+ interview still got the
+            # "tell me about your experience" opener the forced_topic fix
+            # exists specifically to prevent.
+            opening_topic = (profile.get("recommended_topics") or topics_list)[0]
             try:
                 result = llm.interview_turn(
                     user_id=user_id, topics=topics_list, resume_text=session["resume_text"],
-                    conversation=[], persona=session["persona"],
+                    conversation=[], forced_topic=opening_topic, persona=session["persona"],
                     target_role=target_role, candidate_profile=profile,
                 )
             except Exception as e:
