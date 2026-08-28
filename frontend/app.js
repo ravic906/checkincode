@@ -102,6 +102,7 @@ function showHome() {
   document.getElementById("homeScreen").style.display = "flex";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("dashboardScreen").style.display = "none";
   _onPracticeScreen = false;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
@@ -136,6 +137,7 @@ function showSqlTrack() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("dashboardScreen").style.display = "none";
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
@@ -151,6 +153,7 @@ function showPythonTrack() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("dashboardScreen").style.display = "none";
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
@@ -166,6 +169,7 @@ function showCaseTrack() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "flex";
   document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("dashboardScreen").style.display = "none";
   _onPracticeScreen = true;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
@@ -179,11 +183,120 @@ function showInterviewScreen() {
   document.getElementById("homeScreen").style.display = "none";
   document.getElementById("practiceLayout").style.display = "none";
   document.getElementById("interviewScreen").style.display = "flex";
+  document.getElementById("dashboardScreen").style.display = "none";
   _onPracticeScreen = false;
   updateSignInGatedUI();
   updateAskPhoenixFabVisibility();
   closeAskPhoenix();
   logActivity("viewed_mock_interview");
+}
+
+function showDashboardScreen() {
+  document.getElementById("homeScreen").style.display = "none";
+  document.getElementById("practiceLayout").style.display = "none";
+  document.getElementById("interviewScreen").style.display = "none";
+  document.getElementById("dashboardScreen").style.display = "block";
+  _onPracticeScreen = false;
+  updateSignInGatedUI();
+  updateAskPhoenixFabVisibility();
+  closeAskPhoenix();
+  loadDashboard();
+}
+
+const TRACK_LABEL = { sql: "SQL", python: "Python", case: "Business Case" };
+
+async function loadDashboard() {
+  const statsEl = document.getElementById("dashboardStats");
+  const suggestionEl = document.getElementById("dashboardSuggestion");
+  const strengthsEl = document.getElementById("dashboardStrengths");
+  const weaknessesEl = document.getElementById("dashboardWeaknesses");
+  statsEl.innerHTML = `<div class="loading-dots">Loading your progress…</div>`;
+  suggestionEl.innerHTML = "";
+  strengthsEl.innerHTML = "";
+  weaknessesEl.innerHTML = "";
+
+  let data;
+  try {
+    data = await api("/api/dashboard/progress");
+  } catch (err) {
+    statsEl.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const trackOrder = ["sql", "python", "case"];
+  statsEl.innerHTML = trackOrder
+    .filter((t) => data.overall[t])
+    .map((t) => {
+      const o = data.overall[t];
+      const pct = o.total_available ? Math.round((o.solved / o.total_available) * 100) : 0;
+      return `
+        <div class="dashboard-stat-card">
+          <div class="dashboard-stat-track">${TRACK_LABEL[t] || t}</div>
+          <div class="dashboard-stat-n">${o.solved}<span class="dashboard-stat-of">/${o.total_available}</span></div>
+          <div class="dashboard-stat-label">problems solved</div>
+          <div class="dashboard-stat-bar"><div class="dashboard-stat-bar-fill" style="width:${pct}%"></div></div>
+        </div>
+      `;
+    })
+    .join("") || `<p class="empty-note">No problems in the bank yet.</p>`;
+
+  if (data.suggested_next_topic) {
+    const s = data.suggested_next_topic;
+    suggestionEl.innerHTML = `
+      <div class="suggestion-card ${s.basis === "weakness" ? "suggestion-weak" : "suggestion-progress"}">
+        <div class="suggestion-label">${s.basis === "weakness" ? "Suggested: shore up a weak spot" : "Suggested: next topic"}</div>
+        <div class="suggestion-topic">${escapeHtml(s.topic)} <span class="pill tag-pill">${TRACK_LABEL[s.track] || s.track}</span></div>
+        <p class="suggestion-reason">${escapeHtml(s.reason)}</p>
+        <button class="suggestion-cta" id="suggestionCtaBtn">Practice this topic</button>
+      </div>
+    `;
+    document.getElementById("suggestionCtaBtn").onclick = () => filterProblemsByTopic(s.topic, s.track);
+  } else {
+    suggestionEl.innerHTML = `<div class="suggestion-card suggestion-done"><p>You've attempted every topic in the bank — nice work. Keep sharpening with fresh attempts on anything below.</p></div>`;
+  }
+
+  const renderTopicList = (container, rows, kind) => {
+    if (!rows.length) {
+      container.innerHTML = `<p class="empty-note">${kind === "strength" ? "Solve a few more problems in a topic to see it show up here." : "No clear weak spots yet — keep going."}</p>`;
+      return;
+    }
+    container.innerHTML = rows
+      .map((r) => `
+        <div class="topic-row" data-track="${escapeHtml(r.track)}" data-topic="${escapeHtml(r.topic)}">
+          <button type="button" class="topic-row-main" data-practice>
+            <span class="topic-row-name">${escapeHtml(r.topic)}</span>
+            <span class="pill tag-pill">${TRACK_LABEL[r.track] || r.track}</span>
+            <span class="topic-row-stat">${r.solved}/${r.attempted} solved (${Math.round(r.solve_rate * 100)}%)</span>
+          </button>
+          <button type="button" class="topic-row-dismiss" data-dismiss title="Remove from this list">✕</button>
+        </div>
+      `)
+      .join("");
+
+    container.querySelectorAll("[data-practice]").forEach((btn) => {
+      const row = btn.closest(".topic-row");
+      btn.onclick = () => filterProblemsByTopic(row.dataset.topic, row.dataset.track);
+    });
+    container.querySelectorAll("[data-dismiss]").forEach((btn) => {
+      const row = btn.closest(".topic-row");
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await api("/api/dashboard/dismiss-topic", {
+            method: "POST",
+            body: JSON.stringify({ track: row.dataset.track, topic: row.dataset.topic }),
+          });
+          loadDashboard();
+        } catch (err) {
+          alert(`Couldn't remove: ${err.message}`);
+          btn.disabled = false;
+        }
+      };
+    });
+  };
+
+  renderTopicList(strengthsEl, data.strengths, "strength");
+  renderTopicList(weaknessesEl, data.weaknesses, "weakness");
 }
 
 // Shared markup/wiring for a Monthly + Yearly choice, reused by the tier
@@ -1425,6 +1538,7 @@ async function init() {
     showInterviewScreen();
     if (window.renderInterviewSetup) window.renderInterviewSetup();
   };
+  document.getElementById("dashboardNavBtn").onclick = showDashboardScreen;
 
   // The problem list itself IS needed before the URL-restore logic below
   // can show the right track/problem, so this one still has to be

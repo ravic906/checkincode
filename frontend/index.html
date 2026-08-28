@@ -29,6 +29,12 @@
       <span class="brand-wordmark">Phoenix<span class="brand-accent">Prep</span><span class="brand-pro" id="brandPro" hidden>PRO</span></span>
     </div>
     <div class="topbar-right">
+      <button class="dashboard-nav-btn" id="dashboardNavBtn" title="Your progress, strengths & weaknesses">
+        <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 19V10M12 19V5M20 19v-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>My Progress</span>
+      </button>
       <button class="contact-support-btn" id="contactSupportBtn" title="Get in touch with us">
         <svg class="contact-support-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M12 3C7.03 3 3 6.58 3 11c0 2.39 1.19 4.53 3.06 6.02-.1.98-.42 2.24-1.24 3.4a.5.5 0 0 0 .5.78c2.1-.42 3.6-1.36 4.53-2.1.99.24 2.05.37 3.15.37 4.97 0 9-3.58 9-8s-4.03-8-9-8Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
@@ -101,6 +107,27 @@
   </section>
 
   <section class="interview-screen" id="interviewScreen" style="display:none;"></section>
+
+  <section class="dashboard-screen" id="dashboardScreen" style="display:none;">
+    <div class="dashboard-header">
+      <h1>My Progress</h1>
+      <p class="home-sub">Where you stand across every track, and what's worth practicing next.</p>
+    </div>
+    <div class="dashboard-stats" id="dashboardStats"></div>
+    <div class="dashboard-suggestion" id="dashboardSuggestion"></div>
+    <div class="dashboard-columns">
+      <div class="dashboard-col">
+        <h3>Strengths</h3>
+        <p class="dashboard-col-sub">Topics you're consistently solving.</p>
+        <div id="dashboardStrengths"></div>
+      </div>
+      <div class="dashboard-col">
+        <h3>Weaknesses</h3>
+        <p class="dashboard-col-sub">Topics worth another pass.</p>
+        <div id="dashboardWeaknesses"></div>
+      </div>
+    </div>
+  </section>
 
   <div class="layout" id="practiceLayout" style="display:none;">
     <aside class="sidebar" id="sidebar">

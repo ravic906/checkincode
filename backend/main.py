@@ -55,6 +55,7 @@ import pysandbox
 import auth
 import users as users_module
 import payments
+import dashboard
 
 app = FastAPI(title="SQL Practice MVP")
 
@@ -641,6 +642,43 @@ def api_my_submissions_for_problem(problem_id: str, x_user_id: str = Header(defa
     this can never reveal another user's submissions."""
     user_id = auth.resolve_user_id(authorization, x_user_id)
     return {"submissions": problems_module.get_user_submissions_for_problem(user_id, problem_id)}
+
+
+@app.get("/api/dashboard/progress")
+def api_dashboard_progress(x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """
+    The candidate progress dashboard: per-track solved/attempted totals,
+    per-topic Strengths/Weaknesses (computed from this user's own
+    submission history, topics a user dismissed excluded), and one
+    suggested next topic to practice. See dashboard.py for the actual
+    computation -- this endpoint is just auth + a thin wrapper.
+    """
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    return dashboard.get_progress(user_id)
+
+
+class DismissTopicRequest(BaseModel):
+    track: str
+    topic: str
+
+
+@app.post("/api/dashboard/dismiss-topic")
+def api_dashboard_dismiss_topic(req: DismissTopicRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """Hides one topic from the caller's own Strengths/Weaknesses lists --
+    purely a display filter, never touches the underlying submissions or
+    the real solved/attempted counts."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    dashboard.dismiss_topic(user_id, req.track, req.topic)
+    return {"track": req.track, "topic": req.topic, "dismissed": True}
+
+
+@app.post("/api/dashboard/restore-topic")
+def api_dashboard_restore_topic(req: DismissTopicRequest, x_user_id: str = Header(default=None), authorization: str | None = Header(default=None)):
+    """Undoes a dismiss -- the topic can reappear in Strengths/Weaknesses
+    on the next /api/dashboard/progress call if it still qualifies."""
+    user_id = auth.resolve_user_id(authorization, x_user_id)
+    dashboard.restore_topic(user_id, req.track, req.topic)
+    return {"track": req.track, "topic": req.topic, "dismissed": False}
 
 
 def _grade_sql_submission(problem: dict, query: str, num_cases: int | None = None) -> dict:

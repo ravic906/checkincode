@@ -414,6 +414,24 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE ticket_replies ADD COLUMN IF NOT EXISTS attachment_data BYTEA
             """)
+            # Candidate progress dashboard -- lets a user dismiss a topic
+            # from their own Strengths/Weaknesses lists (e.g. a weakness
+            # they've already deliberately deprioritized, or a strength
+            # they don't need surfaced anymore). Scoped per (user, track,
+            # topic) so dismissing "Window Functions" on the SQL track
+            # doesn't affect a same-named topic on another track. Purely
+            # a display filter -- never affects the underlying submission
+            # history or the stats computation itself.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_topic_dismissals (
+                    id SERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    track TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (user_id, track, topic)
+                )
+            """)
 
 
 def dict_cursor(conn):
