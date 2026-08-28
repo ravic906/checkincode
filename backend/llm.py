@@ -1520,13 +1520,26 @@ def _validate_trend_note(trend_note: str | None, topic_scores: list[dict], topic
     return trend_note
 
 
-def _feedback_system_prompt(target_role: str, topic_history: dict | None = None) -> str:
+def _feedback_system_prompt(target_role: str, topic_history: dict | None = None, answered_topics: list[str] | None = None) -> str:
     """[Feedback Generator] Builds the feedback-report system prompt,
     scoped to the role's blended topic list (not the old SQL-only
     topics.ALL_TOPICS) and, when topic_history is available, grounded in
     real past scores so trend_note can never be a fabricated comparison."""
     all_topics = role_topics.topics_for_role(target_role)
     conceptual = [t for t in all_topics if role_topics.is_conceptual(t)]
+
+    coverage_block = ""
+    if answered_topics:
+        coverage_block = (
+            "\nThe candidate gave a real answer on each of these topics "
+            "this interview (in order asked): " + ", ".join(answered_topics) +
+            ". Include exactly one topic_scores entry and at least one "
+            "question_notes entry for EVERY topic in that list -- don't "
+            "silently drop any of them for brevity, and don't add any "
+            "topic outside this list. If two turns covered the same "
+            "topic, you may combine them into a single note rather than "
+            "duplicating entries.\n"
+        )
 
     history_block = ""
     history_lines = []
@@ -1573,6 +1586,7 @@ def _feedback_system_prompt(target_role: str, topic_history: dict | None = None)
         "sections brief and general rather than inventing specific "
         "technical claims to fill space -- an interview that ended after "
         "one question should never read as if it covered several.\n"
+        f"{coverage_block}"
         f"{history_block}"
         "For next_practice_plan[].track: use \"case\" for a topic that's "
         "conceptual/business-discussion rather than a SQL query-technique "
@@ -1602,9 +1616,26 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
     Generates the end-of-interview feedback report from the full transcript.
     Returns {"report": {...parsed fields...}, "usage": {...}}.
     """
+    # Computed up front (not just as a post-hoc filter) so the model gets
+    # handed the exact closed list of topics it must cover, rather than
+    # being trusted to notice completeness on its own from the raw
+    # transcript -- QA found it silently writing up only 2 of 7 genuinely
+    # answered topics, dropping the rest for no structural reason.
+    all_topics_for_role = role_topics.topics_for_role(target_role)
+    answered_topics_ordered: list[str] = []
+    _seen_answered = set()
+    _last_asked_topic_pre = None
+    for turn in conversation:
+        if turn.get("role") == "assistant" and turn.get("topic"):
+            _last_asked_topic_pre = turn["topic"]
+        elif turn.get("role") == "user" and _last_asked_topic_pre:
+            if _last_asked_topic_pre in all_topics_for_role and _last_asked_topic_pre not in _seen_answered:
+                _seen_answered.add(_last_asked_topic_pre)
+                answered_topics_ordered.append(_last_asked_topic_pre)
+
     transcript = "\n".join(f"{t['role'].upper()}: {t['content']}" for t in conversation)
     messages = [
-        {"role": "system", "content": _feedback_system_prompt(target_role, topic_history)},
+        {"role": "system", "content": _feedback_system_prompt(target_role, topic_history, answered_topics_ordered)},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
     result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=2500, json_mode=True)
@@ -1626,14 +1657,8 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
         # asked about at all. answered_topics is the stricter check: a
         # topic only counts once a real USER turn actually follows an
         # assistant turn tagged with it.
-        all_topics = role_topics.topics_for_role(target_role)
-        answered_topics = set()
-        _last_asked_topic = None
-        for turn in conversation:
-            if turn.get("role") == "assistant" and turn.get("topic"):
-                _last_asked_topic = turn["topic"]
-            elif turn.get("role") == "user" and _last_asked_topic:
-                answered_topics.add(_last_asked_topic)
+        all_topics = all_topics_for_role
+        answered_topics = set(answered_topics_ordered)
         report["topic_scores"] = [
             t for t in report.get("topic_scores", [])
             if isinstance(t, dict) and t.get("topic") in all_topics

@@ -114,39 +114,49 @@ _RATIO_TOLERANCE = 0.10  # only correct once the running ratio drifts this far o
 def enforce_topic_ratio(*, conversation: list[dict], role: str, chosen_topic: str) -> str:
     """
     Called on every switch_topic decision (forced by the turn-budget cap,
-    OR the interviewer's own discretionary choice) to keep a role with
-    BOTH topic types roughly on the target application:theory split,
-    rather than trusting the model's own topic choice to average out
-    correctly on its own -- same "deterministic guardrail over model
-    self-compliance" precedent as every other topic-tracking fix in this
-    file/llm.py. A role with only one topic type (e.g. Power Automate
-    Developer, all-conceptual) has nothing to balance and is returned
-    unchanged.
+    OR the interviewer's own discretionary choice) for EVERY role, to
+    guard two things the model's own topic field was never otherwise
+    checked against on this path (only the forced/budget-cap path was):
 
-    Only OVERRIDES `chosen_topic` when the running ratio has drifted
-    more than _RATIO_TOLERANCE off target AND the model's own choice
-    would make that drift worse -- a choice that's already correcting
-    the balance, or within tolerance, passes through untouched.
+    1. A straight repeat -- `chosen_topic` already covered this
+       interview. Applies to every role, single-type or dual-type alike.
+       Caught live on Power Automate Developer (single-type, all
+       conceptual): a mislabeled turn left a topic out of
+       topics_covered, and the model's own next free choice re-picked
+       that exact topic and re-asked a near-identical question, because
+       nothing was checking a free choice against what's already
+       covered.
+    2. For a role with BOTH topic types, the running application:theory
+       split drifting more than _RATIO_TOLERANCE off target with the
+       model's own choice making that drift worse.
 
-    ALSO overrides when `chosen_topic` has already been covered this
-    interview -- a free discretionary switch_topic choice was never
-    otherwise checked against `topics_covered` (only the forced/budget
-    path was), so a topic could pass the ratio check clean and still be
-    a straight repeat. Same guardrail-over-compliance precedent applies
-    here: never assume the model won't re-pick something it already
-    asked just because the type-ratio happens to look fine.
+    Only OVERRIDES `chosen_topic` when (1) or (2) actually fires -- a
+    choice that's already new ground and, where relevant, already
+    correcting the balance or within tolerance, passes through
+    untouched.
     """
     mix = ROLE_TOPIC_MIX.get(role)
-    if not mix or not mix["sql"] or not mix["conceptual"]:
+    if not mix:
         return chosen_topic
 
-    sql_set, conceptual_set = set(mix["sql"]), set(mix["conceptual"])
     covered = {t.get("topic") for t in conversation if t.get("topic")}
+    already_covered = chosen_topic in covered
+
+    has_dual_mix = bool(mix["sql"] and mix["conceptual"])
+    if not has_dual_mix:
+        # No sql/conceptual split to balance -- just guard against a
+        # straight repeat, drawing the replacement from the role's full
+        # topic list in its normal order.
+        if not already_covered:
+            return chosen_topic
+        uncovered = [t for t in topics_for_role(role) if t not in covered]
+        return uncovered[0] if uncovered else chosen_topic  # everything covered -- allow the repeat as a last resort
+
+    sql_set, conceptual_set = set(mix["sql"]), set(mix["conceptual"])
     sql_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in sql_set)
     concept_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in conceptual_set)
     total = sql_count + concept_count
 
-    already_covered = chosen_topic in covered
     if total == 0 and not already_covered:
         return chosen_topic  # nothing asked yet to measure a ratio against, and no repeat either
 
