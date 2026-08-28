@@ -127,25 +127,55 @@ def enforce_topic_ratio(*, conversation: list[dict], role: str, chosen_topic: st
     more than _RATIO_TOLERANCE off target AND the model's own choice
     would make that drift worse -- a choice that's already correcting
     the balance, or within tolerance, passes through untouched.
+
+    ALSO overrides when `chosen_topic` has already been covered this
+    interview -- a free discretionary switch_topic choice was never
+    otherwise checked against `topics_covered` (only the forced/budget
+    path was), so a topic could pass the ratio check clean and still be
+    a straight repeat. Same guardrail-over-compliance precedent applies
+    here: never assume the model won't re-pick something it already
+    asked just because the type-ratio happens to look fine.
     """
     mix = ROLE_TOPIC_MIX.get(role)
     if not mix or not mix["sql"] or not mix["conceptual"]:
         return chosen_topic
 
     sql_set, conceptual_set = set(mix["sql"]), set(mix["conceptual"])
+    covered = {t.get("topic") for t in conversation if t.get("topic")}
     sql_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in sql_set)
     concept_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in conceptual_set)
     total = sql_count + concept_count
-    if total == 0:
-        return chosen_topic  # nothing asked yet to measure a ratio against
 
-    current_ratio = sql_count / total
-    covered = {t.get("topic") for t in conversation if t.get("topic")}
+    already_covered = chosen_topic in covered
+    if total == 0 and not already_covered:
+        return chosen_topic  # nothing asked yet to measure a ratio against, and no repeat either
 
-    if current_ratio < TARGET_APPLICATION_RATIO - _RATIO_TOLERANCE and chosen_topic not in sql_set:
-        uncovered = [t for t in mix["sql"] if t not in covered]
-        return uncovered[0] if uncovered else mix["sql"][0]
-    if current_ratio > TARGET_APPLICATION_RATIO + _RATIO_TOLERANCE and chosen_topic not in conceptual_set:
-        uncovered = [t for t in mix["conceptual"] if t not in covered]
-        return uncovered[0] if uncovered else mix["conceptual"][0]
-    return chosen_topic
+    current_ratio = (sql_count / total) if total else 1.0
+    want_sql = current_ratio < TARGET_APPLICATION_RATIO - _RATIO_TOLERANCE
+    want_concept = current_ratio > TARGET_APPLICATION_RATIO + _RATIO_TOLERANCE
+
+    ratio_violated = (want_sql and chosen_topic not in sql_set) or (want_concept and chosen_topic not in conceptual_set)
+    if not already_covered and not ratio_violated:
+        return chosen_topic
+
+    # Something needs to change -- pick the pool to draw a replacement
+    # from: whichever type the ratio actually wants, when that's the
+    # reason; otherwise stick with chosen_topic's own type (a pure
+    # repeat, ratio itself was fine) and only fall back to the other
+    # type if that pool is fully exhausted too.
+    if want_sql:
+        preferred, fallback = mix["sql"], mix["conceptual"]
+    elif want_concept:
+        preferred, fallback = mix["conceptual"], mix["sql"]
+    elif chosen_topic in sql_set:
+        preferred, fallback = mix["sql"], mix["conceptual"]
+    else:
+        preferred, fallback = mix["conceptual"], mix["sql"]
+
+    uncovered_preferred = [t for t in preferred if t not in covered]
+    if uncovered_preferred:
+        return uncovered_preferred[0]
+    uncovered_fallback = [t for t in fallback if t not in covered]
+    if uncovered_fallback:
+        return uncovered_fallback[0]
+    return chosen_topic  # everything covered everywhere -- nothing better to offer, allow the repeat as a last resort
