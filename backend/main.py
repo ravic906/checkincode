@@ -923,10 +923,17 @@ def api_case_submit(req: CaseSubmitRequest, x_user_id: str = Header(default=None
     return result
 
 
-INTRO_QUESTION = (
-    "Let's get started. Could you briefly introduce yourself and walk me "
-    "through your experience working with SQL and databases?"
-)
+def intro_question(target_role: str) -> str:
+    """The hardcoded (non-LLM) opening question, asked verbatim before
+    skip_intro was a thing and still used whenever it's False. Was a bare
+    constant assuming every role is SQL-heavy -- broke the moment a
+    non-SQL role (Power Automate Developer) existed. Text is byte-for-byte
+    identical to the old constant for every role that has real SQL
+    topics, so this changes nothing for an already-QA'd role; only a
+    role with no SQL component gets the generic phrasing."""
+    has_sql = bool(role_topics.ROLE_TOPIC_MIX.get(target_role, {}).get("sql"))
+    domain = "your experience working with SQL and databases" if has_sql else f"your experience relevant to a {target_role} role"
+    return f"Let's get started. Could you briefly introduce yourself and walk me through {domain}?"
 
 
 MAX_INTERVIEWS_PER_MONTH = 5  # Pro-tier cap -- interviews now also cost real STT + LLM-turn spend, not just the occasional Ask Phoenix call
@@ -1099,7 +1106,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
             raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
         question, topic, action, table_context = result["question"], result["topic"], result["action"], result["table_context"]
     else:
-        question, topic, action, table_context = INTRO_QUESTION, "intro", "intro", None
+        question, topic, action, table_context = intro_question(req.target_role), "intro", "intro", None
 
     interview.record_turn(session, "assistant", question, topic)
     interview.update_topic_tracking(session, action, topic)
@@ -1269,7 +1276,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
                 raise HTTPException(502, f"AI interviewer unavailable right now ({e}).")
             question, topic, action, table_context = result["question"], result["topic"], result["action"], result["table_context"]
         else:
-            question, topic, action, table_context = INTRO_QUESTION, "intro", "intro", None
+            question, topic, action, table_context = intro_question(target_role), "intro", "intro", None
 
         interview.record_turn(session, "assistant", question, topic)
         interview.update_topic_tracking(session, action, topic)

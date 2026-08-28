@@ -704,7 +704,7 @@ def _interview_system_prompt(
             "brief icebreaker, not a real interview topic with a multi-question "
             "budget -- at most one natural follow-up if the answer was "
             "genuinely too thin to work with (see the guidance above on when "
-            "that's warranted), then move to the first real SQL topic.\n\n"
+            "that's warranted), then move to the first real topic below.\n\n"
         )
     elif current_topic:
         topic_budget_block = (

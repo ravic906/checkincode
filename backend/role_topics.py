@@ -15,8 +15,9 @@ known gap to revisit, not a design claim that they're identical roles.
 
 import topics
 import case_topics
+import power_automate_topics
 
-ROLES = ["Data Analyst", "BI Analyst", "Business Analyst", "Product Analyst", "Data Engineer"]
+ROLES = ["Data Analyst", "BI Analyst", "Business Analyst", "Product Analyst", "Data Engineer", "Power Automate Developer"]
 
 _SQL_NO_DML = [t for t in topics.ALL_TOPICS if t != topics.DML_TOPIC]
 
@@ -76,11 +77,18 @@ ROLE_TOPIC_MIX = {
         "sql": topics.ALL_TOPICS,  # DML fair game here -- the DE role touches writes constantly
         "conceptual": case_topics.CASE_DE_TOPICS,
     },
+    "Power Automate Developer": {
+        # No SQL component -- Power Automate is a no-code/low-code tool,
+        # not a database one. Every topic here is conceptual (open spoken
+        # discussion), unlike every other role above.
+        "sql": [],
+        "conceptual": power_automate_topics.POWER_AUTOMATE_TOPICS,
+    },
 }
 
 # Which conceptual-topic pool a topic belongs to, for the table_context /
 # response-schema branch in llm._interview_system_prompt.
-CONCEPTUAL_TOPICS = set(case_topics.CASE_TOPICS)
+CONCEPTUAL_TOPICS = set(case_topics.CASE_TOPICS) | set(power_automate_topics.POWER_AUTOMATE_TOPICS)
 
 
 def topics_for_role(role: str) -> list[str]:

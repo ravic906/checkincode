@@ -163,6 +163,7 @@ const ROLE_CARDS = [
   { value: "Business Analyst", icon: "🧾", desc: "Root-cause analysis, forecasting, cross-functional SQL." },
   { value: "Product Analyst", icon: "🧪", desc: "A/B testing, growth & retention, product sense." },
   { value: "Data Engineer", icon: "🛠️", desc: "Pipelines, schema design, scaling & governance, full SQL." },
+  { value: "Power Automate Developer", icon: "⚡", desc: "Flows, approvals, Teams/SharePoint/Forms integrations, Dataverse." },
 ];
 
 async function renderInterviewSetupScreen() {
