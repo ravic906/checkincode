@@ -1296,12 +1296,20 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
     # was already in progress at the exact moment this migration deployed --
     # falls back to Data Analyst's topic set rather than a hard crash for
     # that narrow window.
-    topics_list = role_topics.topics_for_role(session.get("target_role") or "Data Analyst")
-    forced_topic = (
-        interview.next_topic(session, topics_list)
-        if interview.topic_cap_reached(session)
-        else None
-    )
+    target_role_for_ratio = session.get("target_role") or "Data Analyst"
+    topics_list = role_topics.topics_for_role(target_role_for_ratio)
+    forced_topic = None
+    if interview.topic_cap_reached(session):
+        # Type-correct the budget-driven pick toward the target
+        # application:theory ratio BEFORE the question gets written --
+        # deciding the topic here (not after) is what keeps the eventual
+        # question's content and its topic label from ever disagreeing,
+        # unlike swapping the label post-hoc would.
+        forced_topic = role_topics.enforce_topic_ratio(
+            conversation=session["conversation"],
+            role=target_role_for_ratio,
+            chosen_topic=interview.next_topic(session, topics_list),
+        )
 
     try:
         result = llm.interview_turn(
@@ -1346,7 +1354,11 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
                 conversation=session["conversation"],
                 current_topic=session["current_topic"],
                 topic_turn_count=session["current_topic_turns"],
-                forced_topic=interview.next_topic(session, topics_list),
+                forced_topic=role_topics.enforce_topic_ratio(
+                    conversation=session["conversation"],
+                    role=target_role_for_ratio,
+                    chosen_topic=interview.next_topic(session, topics_list),
+                ),
                 persona=session["persona"],
                 target_role=session.get("target_role") or "Data Analyst",
                 candidate_profile=session.get("candidate_profile"),

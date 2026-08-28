@@ -100,3 +100,52 @@ def topics_for_role(role: str) -> list[str]:
 
 def is_conceptual(topic: str) -> bool:
     return topic in CONCEPTUAL_TOPICS
+
+
+# Target application(SQL):theory(conceptual) split, measured by actual
+# QUESTIONS asked (not just topics touched -- a topic that got 3 follow-
+# ups counts 3x), matched to what real completed interviews already
+# showed naturally happening (65% application / 35% theory across the
+# last 15 real sessions) rather than an arbitrary number.
+TARGET_APPLICATION_RATIO = 0.65
+_RATIO_TOLERANCE = 0.10  # only correct once the running ratio drifts this far off target -- avoids fighting normal short-term noise (e.g. the very first couple of switches, where any single topic swings the ratio hard)
+
+
+def enforce_topic_ratio(*, conversation: list[dict], role: str, chosen_topic: str) -> str:
+    """
+    Called on every switch_topic decision (forced by the turn-budget cap,
+    OR the interviewer's own discretionary choice) to keep a role with
+    BOTH topic types roughly on the target application:theory split,
+    rather than trusting the model's own topic choice to average out
+    correctly on its own -- same "deterministic guardrail over model
+    self-compliance" precedent as every other topic-tracking fix in this
+    file/llm.py. A role with only one topic type (e.g. Power Automate
+    Developer, all-conceptual) has nothing to balance and is returned
+    unchanged.
+
+    Only OVERRIDES `chosen_topic` when the running ratio has drifted
+    more than _RATIO_TOLERANCE off target AND the model's own choice
+    would make that drift worse -- a choice that's already correcting
+    the balance, or within tolerance, passes through untouched.
+    """
+    mix = ROLE_TOPIC_MIX.get(role)
+    if not mix or not mix["sql"] or not mix["conceptual"]:
+        return chosen_topic
+
+    sql_set, conceptual_set = set(mix["sql"]), set(mix["conceptual"])
+    sql_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in sql_set)
+    concept_count = sum(1 for t in conversation if t.get("role") == "assistant" and t.get("topic") in conceptual_set)
+    total = sql_count + concept_count
+    if total == 0:
+        return chosen_topic  # nothing asked yet to measure a ratio against
+
+    current_ratio = sql_count / total
+    covered = {t.get("topic") for t in conversation if t.get("topic")}
+
+    if current_ratio < TARGET_APPLICATION_RATIO - _RATIO_TOLERANCE and chosen_topic not in sql_set:
+        uncovered = [t for t in mix["sql"] if t not in covered]
+        return uncovered[0] if uncovered else mix["sql"][0]
+    if current_ratio > TARGET_APPLICATION_RATIO + _RATIO_TOLERANCE and chosen_topic not in conceptual_set:
+        uncovered = [t for t in mix["conceptual"] if t not in covered]
+        return uncovered[0] if uncovered else mix["conceptual"][0]
+    return chosen_topic

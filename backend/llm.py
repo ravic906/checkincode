@@ -715,6 +715,7 @@ def _interview_system_prompt(
         )
 
     conceptual_in_scope = [t for t in topics if role_topics.is_conceptual(t)]
+    sql_in_scope = [t for t in topics if not role_topics.is_conceptual(t)]
     conceptual_note = ""
     if conceptual_in_scope:
         conceptual_note = (
@@ -727,6 +728,25 @@ def _interview_system_prompt(
             "dropped 15% last quarter), state them directly in the spoken "
             "question instead of a table.\n\n"
         )
+        if sql_in_scope:
+            # Supplementary nudge for the interviewer's OWN discretionary
+            # switch_topic choices -- the real enforcement is a
+            # deterministic guardrail (role_topics.enforce_topic_ratio,
+            # applied server-side at every FORCED topic switch), which
+            # this note can't replace; it only covers the gap that
+            # guardrail can't safely reach (overriding an already-written
+            # question's topic after the fact would leave its label
+            # disagreeing with its own content). Treat this as "lean this
+            # way when it's genuinely your call," not a hard rule.
+            conceptual_note += (
+                f"Over the course of the FULL interview, roughly "
+                f"{int(role_topics.TARGET_APPLICATION_RATIO * 100)}% of questions "
+                "should end up being SQL/application topics and the rest "
+                "conceptual/theory ones -- when it's genuinely your own "
+                "judgment call whether to switch and which topic to switch "
+                "to (not a case already forced by the topic budget above), "
+                "let that rough split guide the choice.\n\n"
+            )
 
     return (
         f"You are conducting a live, spoken interview for a candidate "
