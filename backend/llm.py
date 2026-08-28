@@ -1557,22 +1557,36 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
         # reply for fields other code depends on structurally" precedent as
         # interview_turn's topic normalization -- record_topic_history()
         # needs every topic_scores entry to be a real topic with a real
-        # score, not whatever the model happened to return. Also cross-
-        # checked against topics ACTUALLY covered in the transcript --
-        # observed live to otherwise include an uncovered topic with a
-        # fabricated low score ("this topic was not covered"), which would
-        # silently corrupt the permanent topic-history table with a false
-        # weak-topic signal for something the candidate was never even
-        # asked about.
+        # score, not whatever the model happened to return.
+        #
+        # covered_topics (topic ever appears on an assistant turn) isn't
+        # strict enough on its own: QA found that ending an interview right
+        # after a question was ASKED but before the candidate answered it
+        # still got a full topic_score/question_note back for it, complete
+        # with a fabricated candidate_answer_summary ("The candidate wrote
+        # a basic SELECT statement...") for a reply that was never given --
+        # plus, separately, entire fabricated Q&A exchanges for topics never
+        # asked about at all. answered_topics is the stricter check: a
+        # topic only counts once a real USER turn actually follows an
+        # assistant turn tagged with it.
         all_topics = role_topics.topics_for_role(target_role)
-        covered_topics = {t.get("topic") for t in conversation if t.get("topic")}
+        answered_topics = set()
+        _last_asked_topic = None
+        for turn in conversation:
+            if turn.get("role") == "assistant" and turn.get("topic"):
+                _last_asked_topic = turn["topic"]
+            elif turn.get("role") == "user" and _last_asked_topic:
+                answered_topics.add(_last_asked_topic)
         report["topic_scores"] = [
             t for t in report.get("topic_scores", [])
             if isinstance(t, dict) and t.get("topic") in all_topics
-            and t.get("topic") in covered_topics
+            and t.get("topic") in answered_topics
             and isinstance(t.get("score"), (int, float))
         ]
-        report.setdefault("question_notes", [])
+        report["question_notes"] = [
+            q for q in report.get("question_notes", [])
+            if isinstance(q, dict) and q.get("topic") in answered_topics
+        ]
         report.setdefault("next_practice_plan", [])
         report["trend_note"] = _validate_trend_note(report.get("trend_note"), report["topic_scores"], topic_history)
     except (json.JSONDecodeError, KeyError):

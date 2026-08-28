@@ -1399,7 +1399,12 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   font-family: "SF Mono", Consolas, monospace;
   font-size: 12px;
   color: #a5d6ff;
-  white-space: pre-wrap;
+  /* pre, not pre-wrap: unlike schema-block's free-flowing SQL text, this
+     is a pipe-delimited ASCII table where columns must stay aligned --
+     wrapping mid-row on a narrow (mobile) viewport breaks the alignment
+     entirely and reads as garbled. overflow-x:auto lets it scroll
+     horizontally instead, keeping the table intact. */
+  white-space: pre;
   overflow-x: auto;
   margin: 0;
 }
