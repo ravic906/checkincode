@@ -1401,17 +1401,29 @@ def interview_turn(
         # above and the candidate_stuck override in main.py.
         if action == "switch_topic" and topic not in topics:
             topic = topics[0]
-        # Same "intro" mislabeling, different action: QA found the model
-        # will sometimes echo topic="intro" on a follow_up turn even long
-        # after skip_intro started the interview on a real topic (i.e.
-        # current_topic was never actually "intro" this session). Left
-        # uncorrected, update_topic_tracking (interview.py) sees that as a
-        # genuine topic change -- current_topic flips to "intro",
-        # topics_covered gets polluted with a non-real topic, and the
-        # candidate gets a confused "let's go back to..." moment. "intro"
-        # is only ever a legitimate follow_up label when the session is
-        # actually still on the intro (current_topic is None/"intro").
-        if action == "follow_up" and topic == "intro" and current_topic not in (None, "intro"):
+        # Generalized version of the "intro" mislabeling fix above, for
+        # any non-switch action (follow_up/probe): QA found the model
+        # will sometimes echo a topic label that isn't "intro" either --
+        # not in the real topics list at all (e.g. "Indexing and Query
+        # Performance", "Metadata Queries" on a BI Analyst interview,
+        # neither ever a configured topic for that role) -- while the
+        # action still says follow_up, meaning it's continuing the SAME
+        # real topic but mislabeling it. Left uncorrected,
+        # update_topic_tracking (interview.py) sees the invented label as
+        # a genuine new topic: current_topic flips to it, topics_covered
+        # gets polluted with a name that isn't real, and the REAL topic
+        # never gets marked covered -- confirmed live this eventually
+        # makes next_topic() re-select and re-ask an already-covered real
+        # topic later in the same interview, verbatim enough that the
+        # candidate noticed and said so ("We have already discussed this
+        # question"). A non-switch action can only legitimately be
+        # continuing whatever topic the session is actually already on.
+        # "intro" is one specific case of this: it's not in `topics` either,
+        # so it's already covered here whenever current_topic has moved
+        # past the intro phase -- only excluded when current_topic really
+        # is still "intro" itself, where topic="intro" is legitimate and
+        # must pass through unchanged.
+        if action != "switch_topic" and topic not in topics and current_topic and current_topic != "intro":
             topic = current_topic
         return {
             "action": action,

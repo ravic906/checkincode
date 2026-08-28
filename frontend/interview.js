@@ -900,10 +900,17 @@ async function sendAnswer(answerText) {
     // starts, so what's on screen never gets ahead of what's been said.
     await speak(res.question, () => {
       interviewState.transcript.push({ role: "assistant", content: res.question, topic: res.topic });
-      if (res.table_context) {
-        interviewState.tableContext = res.table_context;
-        renderTableContext();
-      }
+      // Always assign (not just when truthy) and always re-render -- this
+      // used to only update on a NEW table_context, so once a question
+      // moved from a SQL topic to a conceptual one (table_context: null,
+      // by design -- see llm.py's conceptual_note), the old table just
+      // stayed on screen indefinitely with nothing to clear it. User
+      // report: "table stayed forever even after the question was
+      // answered" on a BI Analyst interview, which blends both topic
+      // types. renderTableContext() already hides the panel on a falsy
+      // tableContext, so this one-line change is the whole fix.
+      interviewState.tableContext = res.table_context || null;
+      renderTableContext();
       startTextReveal(interviewState.transcript.length - 1, res.question, currentAudio);
     });
   } catch (err) {
