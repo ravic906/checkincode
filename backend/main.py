@@ -23,7 +23,6 @@ Tiering (Postgres-backed, see users.py):
 """
 
 import hmac
-import json
 import os
 import re
 from urllib.parse import unquote
@@ -1525,69 +1524,6 @@ def _require_admin(request: Request):
         return
 
     raise HTTPException(403, "Invalid or missing admin credentials.")
-
-
-@app.post("/api/admin/interview/backfill-feedback")
-def api_admin_backfill_interview_feedback(request: Request):
-    """
-    One-off admin action: regenerates topic_scores/question_notes/
-    overall_summary/strengths/weaknesses/score/topics_to_study/
-    next_practice_plan/rough_level for every already-completed interview,
-    using the fuller answered-topics-coverage prompt (llm.py's
-    interview_feedback fix -- previously the model would silently write
-    up only a subset of the topics genuinely answered).
-
-    Deliberately does NOT touch trend_note or call
-    interview.record_topic_history() again: topic_history read fresh
-    right now would include every OTHER interview that happened since,
-    including ones after this session in real time -- recomputing
-    trend_note against that would leak future context into a past
-    report, and re-recording topic_history would duplicate rows in
-    interview_topic_history for every session touched. trend_note is
-    carried over unchanged from the existing stored feedback instead.
-    """
-    _require_admin(request)
-    with db.get_conn() as conn:
-        with db.dict_cursor(conn) as cur:
-            cur.execute(
-                "SELECT session_id, user_id, target_role, conversation, feedback "
-                "FROM interview_sessions WHERE ended = TRUE ORDER BY started_at"
-            )
-            rows = cur.fetchall()
-
-    updated, skipped, errors = 0, 0, []
-    for row in rows:
-        session_id = row["session_id"]
-        user_id = row["user_id"]
-        target_role = row["target_role"] or "Data Analyst"
-        conversation = row["conversation"] or []
-        old_feedback = row["feedback"] or {}
-
-        if not any(t.get("role") == "user" for t in conversation):
-            skipped += 1
-            continue
-
-        try:
-            result = llm.interview_feedback(
-                user_id=user_id, conversation=conversation,
-                target_role=target_role, topic_history=None,
-            )
-            new_feedback = result["report"]
-            new_feedback["trend_note"] = old_feedback.get("trend_note")
-        except Exception as e:
-            errors.append({"session_id": session_id, "error": str(e)})
-            continue
-
-        with db.get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE interview_sessions SET feedback = %s WHERE session_id = %s",
-                    (json.dumps(new_feedback), session_id),
-                )
-            conn.commit()
-        updated += 1
-
-    return {"updated": updated, "skipped_no_answers": skipped, "errors": errors, "total": len(rows)}
 
 
 @app.post("/api/admin/problems/generate-batch")
