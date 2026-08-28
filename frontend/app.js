@@ -1202,11 +1202,17 @@ function renderResult(result, isPartialCheck = false) {
       // trace exactly why their query produced the wrong output on this
       // specific data, instead of just being told "wrong" with no way to
       // inspect what was actually being queried.
+      const tableNames = Object.keys(result.failed_case_tables);
       const failTablesHtml = Object.entries(result.failed_case_tables)
         .map(([name, table]) => renderTable(name, table))
         .join("");
+      // Explicitly say "one test case" and name its tables -- a schema with
+      // several real tables (customers/orders/products/...) renders several
+      // table blocks here, which reads as "multiple test cases" unless the
+      // heading rules that out directly.
+      const tableWord = tableNames.length === 1 ? "table" : "tables";
       html += `<div class="failed-case-data">
-        <h4>Test data for this failing case</h4>
+        <h4>Test data for this one failing case (${tableNames.length} ${tableWord}: ${tableNames.map(escapeHtml).join(", ")})</h4>
         ${failTablesHtml}
       </div>`;
     }
