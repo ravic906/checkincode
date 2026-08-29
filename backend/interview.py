@@ -247,8 +247,20 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
     if session["current_topic"] is None or topic != session["current_topic"]:
         outgoing_topic = session["current_topic"]
         if outgoing_topic is not None and outgoing_topic != "intro" and target_role:
+            # candidate_stuck on THIS call, not just the accumulated
+            # current_topic_struggled flag, must count toward the outgoing
+            # topic -- a clear "I don't know" very often makes the model
+            # switch_topic in the SAME call rather than staying and getting
+            # force-switched next turn (confirmed live: a 6-topic "I don't
+            # know" stress run scored 0 easy_topics_stuck under the
+            # accumulated-flag-only version, because every switch was
+            # exactly this same-call case). The turn that reports
+            # candidate_stuck is always describing the answer just given on
+            # whatever topic was current before this call's switch, so it's
+            # the outgoing topic's signal regardless of which branch fires.
+            outgoing_struggled = session.get("current_topic_struggled") or candidate_stuck
             difficulty = role_topics.difficulty_for_topic(outgoing_topic, target_role)
-            if session.get("current_topic_struggled"):
+            if outgoing_struggled:
                 if difficulty == "easy":
                     session["easy_topics_stuck"] = session.get("easy_topics_stuck", 0) + 1
                 # struggled -> 0 points, still counts toward topics_scored below
