@@ -1,0 +1,52 @@
+.page {
+  padding: 34px clamp(18px, 3vw, 40px) 60px;
+}
+.back {
+  background: none;
+  border: 0;
+  color: var(--color-neutral-500);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 0 22px;
+}
+.kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-400);
+  margin-bottom: 12px;
+}
+.h1 {
+  font-size: 34px;
+  margin: 0 0 10px;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.sub {
+  margin: 0 0 40px;
+  color: var(--color-neutral-400);
+  font-size: 15px;
+  max-width: 56ch;
+  text-wrap: pretty;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 44px;
+}
+
+.columns {
+  display: flex;
+  gap: 48px;
+  flex-wrap: wrap;
+}
+.left { flex: 1; min-width: 320px; }
+.right { flex: 0 0 340px; }
+
+.h2 {
+  font-size: 18px;
+  margin: 0 0 18px;
+  letter-spacing: -0.01em;
+}

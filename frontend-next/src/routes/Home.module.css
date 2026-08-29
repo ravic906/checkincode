@@ -1,0 +1,94 @@
+.page {
+  max-width: 1080px;
+  padding: clamp(36px, 5vw, 64px) clamp(18px, 3vw, 40px) 80px;
+}
+
+.kicker {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-400);
+  margin-bottom: 16px;
+}
+
+.h1 {
+  font-size: clamp(30px, 4.2vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+  max-width: 15ch;
+  text-wrap: balance;
+}
+
+.sub {
+  margin: 0 0 44px;
+  color: var(--color-neutral-400);
+  font-size: 16px;
+  max-width: 52ch;
+  text-wrap: pretty;
+}
+
+.trackGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 14px;
+  margin-bottom: 56px;
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .trackGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.continueHead {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.continueHead h2 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.continueCount {
+  font-size: 12px;
+  color: var(--color-neutral-600);
+}
+
+.tileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  padding: 15px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-neutral-900);
+  background: rgba(35, 37, 50, 0.45);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tileHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tileTrackName {
+  font-size: 11px;
+  color: var(--color-neutral-600);
+}
+.tileTitle {
+  font-size: 14px;
+  color: var(--color-neutral-200);
+}
+
+.emptyState {
+  color: var(--color-neutral-600);
+  font-size: 13px;
+}

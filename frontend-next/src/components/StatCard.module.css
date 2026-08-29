@@ -1,0 +1,15 @@
+.card {
+  border: 1px solid var(--color-neutral-900);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(35, 37, 50, 0.6), rgba(22, 24, 38, 0.6));
+}
+.value {
+  font-family: var(--font-heading);
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.label { font-size: 12px; color: var(--color-neutral-500); }

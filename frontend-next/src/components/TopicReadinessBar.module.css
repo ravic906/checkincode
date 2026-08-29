@@ -1,0 +1,18 @@
+.row { margin-bottom: 15px; }
+.head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.name { color: var(--color-neutral-300); }
+.detail { color: var(--color-neutral-600); font-size: 12px; }
+.track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-neutral-900);
+  overflow: hidden;
+}
+.fill { height: 100%; }
+.fillStrong { background: linear-gradient(90deg, var(--color-accent-700), var(--color-accent)); }
+.fillWeak { background: linear-gradient(90deg, oklch(0.42 0.045 78), oklch(0.78 0.105 78)); }

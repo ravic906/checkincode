@@ -1,0 +1,73 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 2vw, 26px);
+  padding: 16px clamp(18px, 3vw, 40px);
+  border-bottom: 1px solid var(--color-neutral-900);
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text);
+}
+.brand:hover { color: var(--color-text); }
+
+.brandMark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--color-accent);
+  box-shadow: 0 0 14px oklch(0.660 0.098 262 / 0.45) inset;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--color-accent-300);
+  font-weight: 600;
+}
+
+.brandWord {
+  font-family: var(--font-heading);
+  font-weight: 500;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.navBtn {
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-neutral-400);
+  border: 1px solid transparent;
+  transition: background var(--t-color) ease, color var(--t-color) ease;
+}
+.navBtn:hover { color: var(--color-neutral-200); }
+.navBtnActive {
+  background: var(--color-accent-900);
+  border-color: var(--color-accent-700);
+  color: var(--color-accent-200);
+}
+.navBtnActive:hover { color: var(--color-accent-200); }
+
+.right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.streak {
+  font-size: 12px;
+  color: var(--color-neutral-500);
+}
+
+@media (max-width: 767px) {
+  .nav { order: 3; width: 100%; justify-content: space-between; margin-left: 0; }
+  .navBtn { flex: 1; text-align: center; }
+}

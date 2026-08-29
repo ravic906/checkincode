@@ -1,0 +1,55 @@
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 11px 22px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--color-neutral-900);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-color) ease;
+}
+.row:hover { background: rgba(66, 58, 106, 0.18); }
+.rowSelected {
+  background: rgba(66, 58, 106, 0.32);
+  border-left-color: var(--color-accent);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stateDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex: 0 0 8px;
+  border: 1px solid var(--color-neutral-700);
+  background: transparent;
+}
+.stateDotSolved {
+  border-color: oklch(0.66 0.075 172);
+  background: oklch(0.66 0.075 172);
+}
+
+.title {
+  flex: 1;
+  font-size: 13.5px;
+  color: var(--color-neutral-200);
+}
+
+.tags {
+  display: flex;
+  gap: 6px;
+  padding-left: 16px;
+}
+.tag {
+  font-size: 10.5px;
+  color: var(--color-neutral-600);
+}
