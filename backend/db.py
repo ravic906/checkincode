@@ -110,6 +110,24 @@ def init_schema():
             cur.execute("""
                 ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS awaiting_history_pref BOOLEAN NOT NULL DEFAULT FALSE
             """)
+            # Migration: struggling-candidate early-stop detection --
+            # difficulty-weighted score (role_topics.difficulty_for_topic)
+            # computed only in update_topic_tracking, used solely by
+            # interview.is_struggling() to decide whether to end the
+            # interview early. Never exposed as, or blended into, the
+            # candidate's actual reported feedback score.
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS struggle_score INTEGER NOT NULL DEFAULT 0
+            """)
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS topics_scored INTEGER NOT NULL DEFAULT 0
+            """)
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS easy_topics_stuck INTEGER NOT NULL DEFAULT 0
+            """)
+            cur.execute("""
+                ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS current_topic_struggled BOOLEAN NOT NULL DEFAULT FALSE
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS problems (
                     id TEXT PRIMARY KEY,

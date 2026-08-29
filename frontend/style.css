@@ -1586,6 +1586,18 @@ button.submit-btn:disabled, button.run-btn:disabled { opacity: 0.5; cursor: not-
   margin: 0 0 20px;
 }
 
+.feedback-early-stop-banner {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--studio-panel-2);
+  border: 1px solid var(--studio-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 0 0 20px;
+}
+
 .feedback-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
 .feedback-col {
   background: var(--studio-panel);

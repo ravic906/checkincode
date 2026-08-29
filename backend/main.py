@@ -1109,7 +1109,7 @@ def api_interview_start(req: InterviewStartRequest, x_user_id: str = Header(defa
         question, topic, action, table_context = intro_question(req.target_role), "intro", "intro", None
 
     interview.record_turn(session, "assistant", question, topic)
-    interview.update_topic_tracking(session, action, topic)
+    interview.update_topic_tracking(session, action, topic, target_role=req.target_role)
     interview.set_last_table_context(session, table_context)
 
     return {
@@ -1235,6 +1235,20 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             "remaining_seconds": 0,
         }
 
+    # Struggling-candidate early-stop -- checked right alongside is_time_up,
+    # same shape and same reason: before any new question gets generated,
+    # so the interview never dangles a fresh unanswered question when it
+    # stops. Only meaningful once real topics have been scored, which can't
+    # happen yet on the awaiting_history_pref branch below (current_topic
+    # is still None there), so this can't misfire on that path.
+    if interview.is_struggling(session):
+        return {
+            "time_up": False,
+            "struggling_early_stop": True,
+            "session_id": session["session_id"],
+            "remaining_seconds": interview.remaining_seconds(session),
+        }
+
     if session.get("awaiting_history_pref"):
         # This reply answers the monologue's "focus on past weak areas, or
         # start fresh?" question, not a real interview question -- generate
@@ -1279,7 +1293,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             question, topic, action, table_context = intro_question(target_role), "intro", "intro", None
 
         interview.record_turn(session, "assistant", question, topic)
-        interview.update_topic_tracking(session, action, topic)
+        interview.update_topic_tracking(session, action, topic, target_role=target_role)
         interview.set_last_table_context(session, table_context)
 
         return {
@@ -1413,7 +1427,7 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
 
     interview.reset_failures(session)
     interview.record_turn(session, "assistant", result["question"], result["topic"])
-    interview.update_topic_tracking(session, result["action"], result["topic"], result.get("candidate_stuck", False), result.get("offer_hint", False))
+    interview.update_topic_tracking(session, result["action"], result["topic"], result.get("candidate_stuck", False), result.get("offer_hint", False), target_role=target_role_for_ratio)
     interview.set_last_table_context(session, result["table_context"])
 
     return {
@@ -1481,10 +1495,17 @@ def api_interview_end(req: InterviewEndRequest, x_user_id: str = Header(default=
     if session["feedback"] is None:
         topics_list = role_topics.topics_for_role(target_role)
         topic_history = interview.get_topic_history(user_id, topics=topics_list)
+        # Re-checked here (not just trusted from whatever /answer last saw)
+        # since /end can also be reached from a normal full-length
+        # completion or the connection-issue "End now" button -- only a
+        # session that's actually struggling by this same deterministic
+        # check should get the kinder framing below.
+        ended_early_due_to_struggle = interview.is_struggling(session)
         try:
             result = llm.interview_feedback(
                 user_id=user_id, conversation=session["conversation"],
                 target_role=target_role, topic_history=topic_history,
+                ended_early_due_to_struggle=ended_early_due_to_struggle,
             )
             feedback = result["report"]
         except Exception as e:

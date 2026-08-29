@@ -102,6 +102,44 @@ def is_conceptual(topic: str) -> bool:
     return topic in CONCEPTUAL_TOPICS
 
 
+_SQL_HARD_TOPICS = {
+    "Normalization and Schema Design",
+    "Transactions and ACID Properties",
+    "Indexing and Query Performance",
+    "Hierarchical Queries",
+}
+_SQL_EASY_COUNT = 3  # first N sql topics in a role's own list count as easy
+
+
+def difficulty_for_topic(topic: str, role: str) -> str:
+    """
+    Rule-based easy/medium/hard tier for an INTERVIEW topic, used only by
+    interview.py's struggle-scoring -- distinct from problems.py's
+    difficulty field on practice problems, which this doesn't touch.
+    No per-topic hand-tagging table to maintain: sql topics lean on the
+    role's own list already being ordered foundational -> advanced (first
+    _SQL_EASY_COUNT = easy, the small fixed _SQL_HARD_TOPICS set = hard,
+    everything else = medium); conceptual topics have no reliable "hard"
+    signal among case-style discussion topics, so only the first
+    (typically the role's most foundational one, e.g. "Metric Design &
+    Definition", "Power Automate Fundamentals") counts as easy and
+    everything else is medium.
+    """
+    mix = ROLE_TOPIC_MIX.get(role)
+    if not mix:
+        return "medium"
+    sql_list, conceptual_list = mix["sql"], mix["conceptual"]
+    if topic in sql_list:
+        if topic in _SQL_HARD_TOPICS:
+            return "hard"
+        if sql_list.index(topic) < _SQL_EASY_COUNT:
+            return "easy"
+        return "medium"
+    if topic in conceptual_list:
+        return "easy" if conceptual_list.index(topic) == 0 else "medium"
+    return "medium"
+
+
 # Target application(SQL):theory(conceptual) split, measured by actual
 # QUESTIONS asked (not just topics touched -- a topic that got 3 follow-
 # ups counts 3x), matched to what real completed interviews already

@@ -19,6 +19,7 @@ import time
 import uuid
 
 import db
+import role_topics
 import topics
 
 INTERVIEW_DURATION_SECONDS = 45 * 60
@@ -27,6 +28,16 @@ TRIAL_DURATION_SECONDS = 10 * 60  # fixed length for a free-tier trial interview
 MAX_TURNS_PER_TOPIC = 3  # initial question + at most 2 follow_up/probe before a forced switch_topic
 MAX_TURNS_INTRO = 2  # intro question + at most 1 follow-up -- it's a brief icebreaker, not a real interview topic, so the generic 3-turn budget is too generous here
 CONNECTION_ISSUE_THRESHOLD = 2  # 2 consecutive STT/LLM failures -- one retry chance after the first, then proactively offer to retry/pause/end
+
+# Struggling-candidate early-stop: an internal, difficulty-weighted running
+# score (role_topics.difficulty_for_topic) used ONLY to decide whether to
+# end the interview early -- never exposed as, or blended into, the
+# candidate's actual reported score in the feedback report (that stays the
+# LLM's own holistic 0-100 judgment, untouched by this).
+DIFFICULTY_POINTS = {"easy": 1, "medium": 2, "hard": 3}
+EASY_TOPICS_STUCK_FAST_STOP = 3  # failing 3 basics is disqualifying on its own, regardless of how anything else went
+MIN_TOPICS_SCORED_FOR_FALLBACK = 3  # need a real sample before judging the average -- avoids ending on 1-2 rough early topics
+WEAK_AVG_POINTS_FLOOR = 1.0  # avg points/topic below this reads as mostly-stuck/easy-only performance
 
 # Superseded by role_topics.topics_for_role(target_role) now that every
 # interview is role-based (SQL topics blended with conceptual ones) rather
@@ -63,6 +74,10 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
         "feedback": None,
         "persona": persona,  # "friendly" | "neutral" | "strict" -- immutable for the session's life
         "awaiting_history_pref": awaiting_history_pref,
+        "struggle_score": 0,
+        "topics_scored": 0,
+        "easy_topics_stuck": 0,
+        "current_topic_struggled": False,
     }
     with db.get_conn() as conn:
         with conn.cursor() as cur:
@@ -72,8 +87,9 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                     (session_id, user_id, mode, target_role, candidate_profile, resume_text, skip_intro, duration_seconds,
                      started_at, topics_covered, conversation, current_topic,
                      current_topic_turns, hint_used_this_topic, consecutive_failures, last_table_context, ended, feedback, persona,
-                     awaiting_history_pref)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     awaiting_history_pref, struggle_score, topics_scored, easy_topics_stuck,
+                     current_topic_struggled)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     session["session_id"], session["user_id"], session["mode"],
@@ -85,7 +101,9 @@ def create_session(*, user_id: str, target_role: str, resume_text: str | None, s
                     session["consecutive_failures"],
                     json.dumps(session["last_table_context"]),
                     session["ended"], json.dumps(session["feedback"]), session["persona"],
-                    session["awaiting_history_pref"],
+                    session["awaiting_history_pref"], session["struggle_score"],
+                    session["topics_scored"], session["easy_topics_stuck"],
+                    session["current_topic_struggled"],
                 ),
             )
     return session
@@ -103,7 +121,8 @@ def save_session(session: dict):
                     topics_covered=%s, conversation=%s, current_topic=%s,
                     current_topic_turns=%s, hint_used_this_topic=%s, consecutive_failures=%s,
                     last_table_context=%s, ended=%s, feedback=%s, awaiting_history_pref=%s,
-                    candidate_profile=%s
+                    candidate_profile=%s, struggle_score=%s, topics_scored=%s, easy_topics_stuck=%s,
+                    current_topic_struggled=%s
                 WHERE session_id=%s
                 """,
                 (
@@ -113,7 +132,10 @@ def save_session(session: dict):
                     session.get("consecutive_failures", 0),
                     json.dumps(session["last_table_context"]), session["ended"],
                     json.dumps(session["feedback"]), session.get("awaiting_history_pref", False),
-                    json.dumps(session.get("candidate_profile")), session["session_id"],
+                    json.dumps(session.get("candidate_profile")),
+                    session.get("struggle_score", 0), session.get("topics_scored", 0),
+                    session.get("easy_topics_stuck", 0), session.get("current_topic_struggled", False),
+                    session["session_id"],
                 ),
             )
 
@@ -177,11 +199,25 @@ def remove_last_turn(session: dict):
         save_session(session)
 
 
-def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuck: bool = False, offer_hint: bool = False):
+def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuck: bool = False, offer_hint: bool = False, target_role: str | None = None):
     """
     Tracks how many consecutive question-turns have been spent on the
     current topic, so callers can enforce MAX_TURNS_PER_TOPIC deterministically
     rather than relying on the model to police its own turn budget.
+
+    Also scores the topic being left behind, on every real switch, toward
+    the struggling-candidate early-stop check (is_struggling below):
+    `current_topic_struggled` is set True the moment candidate_stuck or a
+    repeated hint-offer fires while still on a topic (same signals that
+    already force the turn-budget switch below), then read back -- not
+    re-derived from whatever candidate_stuck happens to be on the actual
+    switch call, which could describe a totally different, fresh answer --
+    at the point that topic is actually left, to award
+    role_topics.difficulty_for_topic-weighted points (0 if struggled) and,
+    for an easy topic that was struggled, bump easy_topics_stuck. `target_role`
+    is optional so existing internal callers/tests that don't care about
+    struggle-scoring don't need updating -- scoring is simply skipped
+    without it.
 
     `candidate_stuck` (the model's read on whether the answer just given was
     a genuine non-attempt, e.g. "I don't know") gets the same deterministic
@@ -209,9 +245,20 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
     topic already in progress is the only signal trusted here.
     """
     if session["current_topic"] is None or topic != session["current_topic"]:
+        outgoing_topic = session["current_topic"]
+        if outgoing_topic is not None and outgoing_topic != "intro" and target_role:
+            difficulty = role_topics.difficulty_for_topic(outgoing_topic, target_role)
+            if session.get("current_topic_struggled"):
+                if difficulty == "easy":
+                    session["easy_topics_stuck"] = session.get("easy_topics_stuck", 0) + 1
+                # struggled -> 0 points, still counts toward topics_scored below
+            else:
+                session["struggle_score"] = session.get("struggle_score", 0) + DIFFICULTY_POINTS.get(difficulty, 2)
+            session["topics_scored"] = session.get("topics_scored", 0) + 1
         session["current_topic"] = topic
         session["current_topic_turns"] = 1
         session["hint_used_this_topic"] = False
+        session["current_topic_struggled"] = False
         if topic not in session["topics_covered"]:
             session["topics_covered"].append(topic)
     else:
@@ -219,11 +266,37 @@ def update_topic_tracking(session: dict, action: str, topic: str, candidate_stuc
         if offer_hint:
             if session.get("hint_used_this_topic"):
                 session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
+                session["current_topic_struggled"] = True
             else:
                 session["hint_used_this_topic"] = True
         if candidate_stuck:
             session["current_topic_turns"] = max(session["current_topic_turns"], MAX_TURNS_PER_TOPIC)
+            session["current_topic_struggled"] = True
     save_session(session)
+
+
+def is_struggling(session: dict) -> bool:
+    """
+    Deterministic early-stop check for a candidate who's clearly not doing
+    well, checked in main.py right alongside is_time_up -- same "return a
+    flag, let the caller decide to end" pattern, never ends the session
+    itself. Two tiers, per struggle_score/topics_scored/easy_topics_stuck
+    kept up to date by update_topic_tracking:
+
+    - Fast path: EASY_TOPICS_STUCK_FAST_STOP basics failed outright is
+      disqualifying on its own, regardless of how anything else went.
+    - Fallback: once there's a real sample (MIN_TOPICS_SCORED_FOR_FALLBACK
+      topics), an average points-per-topic below WEAK_AVG_POINTS_FLOOR
+      reads as broadly weak performance even without hitting the fast path.
+    """
+    if session.get("easy_topics_stuck", 0) >= EASY_TOPICS_STUCK_FAST_STOP:
+        return True
+    topics_scored = session.get("topics_scored", 0)
+    if topics_scored >= MIN_TOPICS_SCORED_FOR_FALLBACK:
+        avg = session.get("struggle_score", 0) / topics_scored
+        if avg < WEAK_AVG_POINTS_FLOOR:
+            return True
+    return False
 
 
 def record_failure(session: dict):

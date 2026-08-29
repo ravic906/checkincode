@@ -1520,7 +1520,7 @@ def _validate_trend_note(trend_note: str | None, topic_scores: list[dict], topic
     return trend_note
 
 
-def _feedback_system_prompt(target_role: str, topic_history: dict | None = None, answered_topics: list[str] | None = None) -> str:
+def _feedback_system_prompt(target_role: str, topic_history: dict | None = None, answered_topics: list[str] | None = None, ended_early_due_to_struggle: bool = False) -> str:
     """[Feedback Generator] Builds the feedback-report system prompt,
     scoped to the role's blended topic list (not the old SQL-only
     topics.ALL_TOPICS) and, when topic_history is available, grounded in
@@ -1565,6 +1565,21 @@ def _feedback_system_prompt(target_role: str, topic_history: dict | None = None,
             "null; never invent a \"since last time\" comparison.\n\n"
         )
 
+    struggle_block = ""
+    if ended_early_due_to_struggle:
+        struggle_block = (
+            "\nThis interview was ended a little early -- the candidate "
+            "was clearly having a tough time across multiple topics, so "
+            "there was no value in continuing to grind through more. "
+            "Frame overall_summary supportively: briefly and warmly "
+            "acknowledge it was a tough session, thank them for their "
+            "time and effort, and keep the emphasis on what to study next "
+            "rather than dwelling on the difficulty. Everything else "
+            "(topic_scores, question_notes, honesty about what genuinely "
+            "went wrong) still follows the same rules as any other "
+            "report -- only the tone of overall_summary changes here.\n\n"
+        )
+
     return (
         "You are an experienced interviewer writing a feedback report "
         f"after a mock interview for a {target_role} role. Review the full "
@@ -1588,6 +1603,7 @@ def _feedback_system_prompt(target_role: str, topic_history: dict | None = None,
         "one question should never read as if it covered several.\n"
         f"{coverage_block}"
         f"{history_block}"
+        f"{struggle_block}"
         "For next_practice_plan[].track: use \"case\" for a topic that's "
         "conceptual/business-discussion rather than a SQL query-technique "
         f"topic ({', '.join(conceptual) if conceptual else 'none in this role'}), "
@@ -1611,7 +1627,7 @@ def _feedback_system_prompt(target_role: str, topic_history: dict | None = None,
     )
 
 
-def interview_feedback(*, user_id: str, conversation: list[dict], target_role: str = "Data Analyst", topic_history: dict | None = None) -> dict:
+def interview_feedback(*, user_id: str, conversation: list[dict], target_role: str = "Data Analyst", topic_history: dict | None = None, ended_early_due_to_struggle: bool = False) -> dict:
     """
     Generates the end-of-interview feedback report from the full transcript.
     Returns {"report": {...parsed fields...}, "usage": {...}}.
@@ -1635,7 +1651,7 @@ def interview_feedback(*, user_id: str, conversation: list[dict], target_role: s
 
     transcript = "\n".join(f"{t['role'].upper()}: {t['content']}" for t in conversation)
     messages = [
-        {"role": "system", "content": _feedback_system_prompt(target_role, topic_history, answered_topics_ordered)},
+        {"role": "system", "content": _feedback_system_prompt(target_role, topic_history, answered_topics_ordered, ended_early_due_to_struggle)},
         {"role": "user", "content": f"Interview transcript:\n\n{transcript}"},
     ]
     result = _call_chat_with_retry(user_id=user_id, problem_id="mock-interview-feedback", messages=messages, max_tokens=2500, json_mode=True)

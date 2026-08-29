@@ -947,6 +947,14 @@ async function sendAnswer(answerText) {
       return;
     }
 
+    if (res.struggling_early_stop) {
+      // Same graceful, no-choice auto-end as time_up -- the candidate is
+      // clearly struggling (backend's deterministic check, not a guess
+      // made here), so there's no new question to speak or wait on.
+      endInterview({ struggling: true });
+      return;
+    }
+
     interviewState.remainingSeconds = res.remaining_seconds;
     // Keep controls disabled until the question has actually finished
     // being read aloud, not just rendered -- otherwise the candidate can
@@ -1012,7 +1020,7 @@ function renderConnectionIssuePrompt(retryFn) {
   document.getElementById("connIssueEnd").onclick = () => { div.remove(); endInterview(); };
 }
 
-async function endInterview() {
+async function endInterview(opts = {}) {
   if (!interviewState) return;
   if (interviewState.timerHandle) clearInterval(interviewState.timerHandle);
   stopSpeaking();
@@ -1027,7 +1035,7 @@ async function endInterview() {
       body: JSON.stringify({ session_id: interviewState.sessionId }),
     });
     clearActiveSessionId();
-    await renderFeedback(res.feedback);
+    await renderFeedback(res.feedback, opts);
   } catch (err) {
     screen.innerHTML = `<div class="feedback-report">
       <div class="result-banner fail">Couldn't generate feedback: ${escapeHtml(err.message)}</div>
@@ -1063,9 +1071,16 @@ function loadTopicTrackMap() {
   return topicTrackMapPromise;
 }
 
-async function renderFeedback(report) {
+async function renderFeedback(report, opts = {}) {
   const screen = document.getElementById("interviewScreen");
   const topicTrack = await loadTopicTrackMap();
+
+  // Only set when the backend's deterministic struggle check (not a guess
+  // made here) ended the interview early -- the connection-issue "End now"
+  // path calls endInterview() with no opts, so it correctly shows nothing.
+  const struggleBannerHtml = opts.struggling
+    ? `<div class="feedback-early-stop-banner">We wrapped up a little early today — thanks for sticking with it and giving it your best shot. Everyone has off days, and the notes below should help you target exactly what to review before your next attempt.</div>`
+    : "";
 
   const scoreHtml = typeof report.score === "number"
     ? `<div class="feedback-score">${report.score}<span>/100</span></div>`
@@ -1137,6 +1152,7 @@ async function renderFeedback(report) {
   screen.innerHTML = `
     <div class="feedback-report">
       <div class="interview-eyebrow">Interview Complete</div>
+      ${struggleBannerHtml}
       <div class="feedback-header">
         <h1>Your Feedback</h1>
         <div class="feedback-header-badges">
