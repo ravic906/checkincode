@@ -1340,17 +1340,27 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
             and session.get("hint_used_this_topic")
             and not is_real_switch
         )
-        # Third trigger for the same immediate-re-run pattern: the
-        # interviewer's OWN free choice of topic (a genuine switch, not
-        # a stuck/hint-cap relabel) is exactly the path enforce_topic_ratio
-        # can't safely correct after the fact -- the question text is
-        # already written FOR that topic, so swapping just the label would
-        # leave them disagreeing (the topic-drift bug fixed earlier this
-        # session). Checking it here, before trusting this pass's result,
-        # means a ratio-violating discretionary switch gets the same
-        # forced-regeneration treatment as candidate_stuck/hint_cap_hit --
-        # confirmed via live testing this is the MAJORITY of real switches,
-        # not the edge case; without this the ratio target is only nominal.
+        # Third trigger for the same immediate-re-run pattern, and the one
+        # that closes the topic-label-vs-question-content mismatch at its
+        # root rather than only catching some downstream symptoms of it:
+        # the interviewer's OWN free choice of topic is exactly the path
+        # where the model picks a topic label AND writes the question
+        # text in the same breath, with nothing forcing them to agree --
+        # confirmed live on a real transcript (topic tagged "Approval
+        # Workflows", question actually about "Instant & Manual Flows"),
+        # which then cascaded into topics_covered missing the real topic
+        # and a verbatim repeat next turn. Every OTHER path in this file
+        # (budget cap, ratio correction, skip_intro's opener) forces the
+        # topic BEFORE the question is written and has never shown this
+        # mismatch -- so rather than only re-running when
+        # enforce_topic_ratio flags a problem, every genuine discretionary
+        # switch now gets discarded and regenerated through that same
+        # forced mechanism unconditionally. enforce_topic_ratio still
+        # decides the destination topic (passing the model's own choice
+        # through untouched when it's valid, uncovered, and keeps the
+        # ratio on target), but the QUESTION for that topic is always
+        # freshly written against a topic that's already been decided,
+        # never inferred alongside it.
         ratio_topic = None
         if is_real_switch and result["action"] == "switch_topic":
             ratio_topic = role_topics.enforce_topic_ratio(
@@ -1358,12 +1368,16 @@ def api_interview_answer(req: InterviewAnswerRequest, x_user_id: str = Header(de
                 role=target_role_for_ratio,
                 chosen_topic=result["topic"],
             )
-        ratio_violated = ratio_topic is not None and ratio_topic != result["topic"]
-        if (result.get("candidate_stuck") and not is_real_switch) or hint_cap_hit or ratio_violated:
+        discretionary_switch = is_real_switch and result["action"] == "switch_topic"
+        if (result.get("candidate_stuck") and not is_real_switch) or hint_cap_hit or discretionary_switch:
             # Re-run right away with a forced switch rather than deferring
             # to next turn, so the candidate never sees a same-topic
-            # rephrase (stuck/hint-cap cases) or a ratio-violating topic
-            # that already has a full question written for it (this case).
+            # rephrase (stuck/hint-cap cases) or a freely-chosen switch
+            # whose question text was written before the topic label was
+            # locked in (this case, unconditionally, per discretionary_switch
+            # above) -- ratio_topic is the destination enforce_topic_ratio
+            # already decided; forcing it here means the question gets
+            # written FOR that exact topic, not just tagged with it.
             result = llm.interview_turn(
                 user_id=user_id,
                 topics=topics_list,
