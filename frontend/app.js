@@ -1072,7 +1072,7 @@ async function loadProblem(id) {
             <button class="submit-btn" id="submitBtn">Submit</button>
           </div>
         </div>
-        <p class="dialect-note">We also accept MySQL, SQL Server (T-SQL), Oracle, Snowflake, and BigQuery syntax — write it the way you know it.</p>
+        <p class="dialect-note">Write your query in whichever SQL dialect you know best — MySQL, SQL Server (T-SQL), Oracle, Postgres, Snowflake, and BigQuery syntax are all accepted.</p>
         <div id="editor"></div>
       </div>
       <div class="results-section" id="resultsSection"></div>
