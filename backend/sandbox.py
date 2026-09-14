@@ -169,17 +169,41 @@ def _execute_with_timeout(problem: dict, query: str, timeout: float):
             )
 
 
-def _resolve_dialect(problem: dict, safe_query: str, trial_seed_sql: str, timeout: float) -> str:
+def _resolve_dialect(
+    problem: dict, safe_query: str, trial_seed_sql: str, timeout: float,
+    trial_expected_columns: list | None = None, trial_expected_rows: list | None = None,
+    order_matters: bool = False,
+) -> str:
     """
     If `safe_query` runs as-is against DuckDB (the common case -- DuckDB is
     close enough to Postgres that most standard SQL just works), returns it
-    unchanged. Otherwise, silently tries transpiling it from each dialect in
+    unchanged -- no ambiguity to resolve when there's only one candidate.
+    Otherwise, silently tries transpiling it from each dialect in
     DIALECT_CANDIDATES to DuckDB (sqlglot) and re-validates + trial-executes
-    each candidate against `trial_seed_sql` -- the first one that both
-    transpiles cleanly and actually runs wins. No dialect is ever assumed;
-    this is pure trial-and-error against real execution, not a guess from
-    syntax alone (e.g. IFNULL is valid DuckDB already; TOP or backticked
+    each candidate against `trial_seed_sql`. No dialect is ever assumed;
+    this is trial-and-error against real execution, not a guess from syntax
+    alone (e.g. IFNULL is valid DuckDB already; TOP or backticked
     identifiers are not, and only fail here to trigger translation).
+
+    Multiple candidates succeeding is common and NOT always a real tie --
+    most of the time they just produce the identical translated SQL text
+    (e.g. NVL/IFNULL normalize to COALESCE under every dialect sqlglot
+    supports here), so there's nothing to actually pick between. But some
+    functions genuinely mean different things per dialect -- ISNULL(x, 0)
+    is a 2-arg "coalesce with default" in T-SQL/Oracle/Snowflake/BigQuery,
+    but a 1-arg boolean "is this null?" check in MySQL. Picking MySQL just
+    because it happens to be first in DIALECT_CANDIDATES would silently
+    grade a genuinely correct T-SQL submission against the WRONG translated
+    query and mark it incorrect for reasons that have nothing to do with
+    the candidate's actual SQL logic. So when successful candidates
+    disagree on the translated text, and the caller supplied the trial
+    seed's real expected output, each disagreeing candidate's ACTUAL
+    result is checked against it (compare_results, same function real
+    grading uses) -- the one that matches wins. If none match (or no
+    expected output was supplied), falls back to DIALECT_CANDIDATES'
+    priority order, same as before -- there's no way to prefer one wrong
+    interpretation over another, so this is a last resort, not a claim
+    that priority order is somehow the "right" dialect.
 
     Translation is deliberately silent -- the candidate never sees which
     dialect was detected or that translation happened at all, same as any
@@ -197,15 +221,28 @@ def _resolve_dialect(problem: dict, safe_query: str, trial_seed_sql: str, timeou
         _execute_with_timeout(trial_problem, safe_query, timeout)
         return safe_query
     except duckdb.Error as original_error:
+        successful = []  # [(translated_sql, columns, rows), ...] in DIALECT_CANDIDATES priority order
         for dialect in DIALECT_CANDIDATES:
             try:
                 translated = sqlglot.transpile(safe_query, read=dialect, write="duckdb")[0]
                 translated = validate_student_sql(translated)
-                _execute_with_timeout(trial_problem, translated, timeout)
-                return translated
+                columns, rows, _truncated = _execute_with_timeout(trial_problem, translated, timeout)
+                successful.append((translated, columns, rows))
             except (sqlglot.errors.SqlglotError, duckdb.Error, SqlValidationError):
                 continue
-        raise original_error
+
+        if not successful:
+            raise original_error
+
+        distinct_texts = {s[0] for s in successful}
+        if len(distinct_texts) == 1 or trial_expected_columns is None:
+            return successful[0][0]
+
+        for translated, columns, rows in successful:
+            is_correct, _diff = compare_results(trial_expected_columns, trial_expected_rows, columns, rows, order_matters)
+            if is_correct:
+                return translated
+        return successful[0][0]
 
 
 def run_query_against_test_cases(
@@ -236,8 +273,20 @@ def run_query_against_test_cases(
     # Resolved ONCE against the first seed dataset, not per test case --
     # dialect detection is trial-and-error execution, and repeating that
     # trial-and-error on every single case would be pure waste once the
-    # right dialect (or "no translation needed") is already known.
-    resolved_query = _resolve_dialect(problem, safe_query, test_case_seeds[0], timeout) if test_case_seeds else safe_query
+    # right dialect (or "no translation needed") is already known. The
+    # first seed's own expected output is passed through so a genuine
+    # cross-dialect ambiguity (e.g. ISNULL meaning different things in
+    # MySQL vs T-SQL) can be broken by which candidate's result actually
+    # matches, not by arbitrary priority order -- see _resolve_dialect.
+    if test_case_seeds:
+        first_expected_columns, first_expected_rows = expected_per_case[0] if expected_per_case else (None, None)
+        resolved_query = _resolve_dialect(
+            problem, safe_query, test_case_seeds[0], timeout,
+            trial_expected_columns=first_expected_columns, trial_expected_rows=first_expected_rows,
+            order_matters=order_matters,
+        )
+    else:
+        resolved_query = safe_query
 
     # Deliberately checked on the RESOLVED query, not the original --
     # backtick/bracket-quoted identifiers (MySQL/T-SQL) don't match this
