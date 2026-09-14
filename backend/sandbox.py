@@ -17,9 +17,17 @@ import re
 import time
 import concurrent.futures
 import duckdb
+import sqlglot
 
 STATEMENT_TIMEOUT_SECONDS = 5
 MAX_RESULT_ROWS = 1000
+
+# Tried in this order, first one that both transpiles AND actually executes
+# against the problem's real schema/seed wins -- picked for what this
+# platform's audience (Indian IT professionals) is most likely to have a
+# background in, MySQL/T-SQL/Oracle first, Snowflake/BigQuery last since
+# they're rarer for this crowd but still worth covering.
+DIALECT_CANDIDATES = ["mysql", "tsql", "oracle", "snowflake", "bigquery"]
 
 # Keywords that would mutate state, touch the filesystem, or otherwise step
 # outside "run a read-only query against the seeded tables."
@@ -144,6 +152,62 @@ def compute_expected_output(problem: dict):
     return _execute(problem, problem["canonical_sql"])
 
 
+def _execute_with_timeout(problem: dict, query: str, timeout: float):
+    """_execute, but bounded by a hard wall-clock timeout via a worker
+    thread -- shared by the per-test-case grading loop and _resolve_dialect's
+    trial executions, since a pathological query (deliberate or not) needs
+    the same protection whether it's the one that eventually grades or one
+    of several dialect guesses being trial-run along the way."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_execute, problem, query)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            raise SqlTimeoutError(
+                f"Query did not finish within {timeout} seconds. "
+                "Check for an unintended cross join or infinite recursion."
+            )
+
+
+def _resolve_dialect(problem: dict, safe_query: str, trial_seed_sql: str, timeout: float) -> str:
+    """
+    If `safe_query` runs as-is against DuckDB (the common case -- DuckDB is
+    close enough to Postgres that most standard SQL just works), returns it
+    unchanged. Otherwise, silently tries transpiling it from each dialect in
+    DIALECT_CANDIDATES to DuckDB (sqlglot) and re-validates + trial-executes
+    each candidate against `trial_seed_sql` -- the first one that both
+    transpiles cleanly and actually runs wins. No dialect is ever assumed;
+    this is pure trial-and-error against real execution, not a guess from
+    syntax alone (e.g. IFNULL is valid DuckDB already; TOP or backticked
+    identifiers are not, and only fail here to trigger translation).
+
+    Translation is deliberately silent -- the candidate never sees which
+    dialect was detected or that translation happened at all, same as any
+    other query that just runs. Falls back to re-raising the ORIGINAL
+    DuckDB error if no candidate dialect works either, since that's more
+    informative for a genuinely broken query than a dialect guess's error.
+    Every trial execution (the original attempt and each dialect guess)
+    goes through the same timeout-wrapped executor as real grading --
+    SqlTimeoutError deliberately isn't caught by the per-dialect except
+    below, so a genuinely expensive query stops resolution immediately
+    rather than burning the timeout budget again on every remaining guess.
+    """
+    trial_problem = {"schema_sql": problem["schema_sql"], "seed_sql": trial_seed_sql}
+    try:
+        _execute_with_timeout(trial_problem, safe_query, timeout)
+        return safe_query
+    except duckdb.Error as original_error:
+        for dialect in DIALECT_CANDIDATES:
+            try:
+                translated = sqlglot.transpile(safe_query, read=dialect, write="duckdb")[0]
+                translated = validate_student_sql(translated)
+                _execute_with_timeout(trial_problem, translated, timeout)
+                return translated
+            except (sqlglot.errors.SqlglotError, duckdb.Error, SqlValidationError):
+                continue
+        raise original_error
+
+
 def run_query_against_test_cases(
     problem: dict,
     query: str,
@@ -167,22 +231,30 @@ def run_query_against_test_cases(
     them, and there's no partial credit to compute by continuing.
     """
     safe_query = validate_student_sql(query)
-    validate_query_references_real_table(safe_query, _extract_schema_table_names(problem["schema_sql"]))
     order_matters = problem.get("order_matters", False)
+
+    # Resolved ONCE against the first seed dataset, not per test case --
+    # dialect detection is trial-and-error execution, and repeating that
+    # trial-and-error on every single case would be pure waste once the
+    # right dialect (or "no translation needed") is already known.
+    resolved_query = _resolve_dialect(problem, safe_query, test_case_seeds[0], timeout) if test_case_seeds else safe_query
+
+    # Deliberately checked on the RESOLVED query, not the original --
+    # backtick/bracket-quoted identifiers (MySQL/T-SQL) don't match this
+    # regex's quoting assumption, so a legitimate foreign-dialect query
+    # referencing a real table would wrongly fail here pre-translation.
+    # Post-resolution, quoting is always normalized to DuckDB's own
+    # convention (or was never touched at all if no translation was
+    # needed), so this still correctly catches a genuinely gaming query
+    # (one with no FROM clause at all never needs translation to "work,"
+    # so it reaches this check completely unchanged either way).
+    validate_query_references_real_table(resolved_query, _extract_schema_table_names(problem["schema_sql"]))
 
     started = time.monotonic()
     last_columns, last_rows, last_truncated = [], [], False
     for i, seed_sql in enumerate(test_case_seeds):
         case_problem = {"schema_sql": problem["schema_sql"], "seed_sql": seed_sql}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_execute, case_problem, safe_query)
-            try:
-                columns, rows, truncated = future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                raise SqlTimeoutError(
-                    f"Query did not finish within {timeout} seconds. "
-                    "Check for an unintended cross join or infinite recursion."
-                )
+        columns, rows, truncated = _execute_with_timeout(case_problem, resolved_query, timeout)
         last_columns, last_rows, last_truncated = columns, rows, truncated
         expected_columns, expected_rows = expected_per_case[i]
         is_correct, diff = compare_results(expected_columns, expected_rows, columns, rows, order_matters)
